@@ -1,0 +1,29 @@
+# deploy-engine 部署配置示例（YAML）
+# 复制到 config/ 并重命名为 deploy.yaml 后使用
+
+deployment_id: my-app-001
+provider_name: aliyun
+
+default:
+  resource:
+    region: cn-hongkong
+    instance_type: ecs.u1-c1m4.xlarge
+    spot_price_limit: 0.5
+    disk_size: 100
+    eip_bandwidth: 100
+  env:
+    # acr_server: registry.cn-hongkong.aliyuncs.com
+    # acr_namespace: my-ns
+    k3s_version: v1.31.4+k3s1
+  deployment:
+    chart_repo_url: https://charts.bitnami.com/bitnami
+    chart_name: nginx
+    release_name: my-release
+    namespace: default
+    values:
+      replicaCount: 1
+
+user_override:
+  deployment:
+    release_name: my-release
+    namespace: default

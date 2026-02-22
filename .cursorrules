@@ -1,0 +1,13 @@
+# diting-infra 仓库操作规则
+
+本文件为本仓（diting-infra）的 Cursor/AI 操作规则，与文档仓 `diting-doc/00_系统规则_通用项目协议.md` 中 §十一「项目定制化」保持一致。**本文件允许并鼓励提交至本仓库**（见协议 §十一「.cursorrules 与仓库提交」）。
+
+---
+
+## charts/dependencies 目录 — 禁止直接修改 Chart
+
+- **禁止**：在 **`charts/dependencies/`** 目录下**直接更改、添加或修改**任一 Chart 的内容（包括但不限于 `templates/`、`Chart.yaml`、`values.yaml` 等 Chart 内文件）。Chart 须从官方/上游下载到本地后**原样存放**使用。
+- **允许**：仅通过 **values 覆盖** 定制行为（如在本仓维护 `values-*.yaml`，或在 `helm install/upgrade` 时使用 `-f`、`--set`）；不得修改 `charts/dependencies/<chart-name>/` 下的 Chart 源码。
+- **版本与更新**：Chart 版本在 `Chart.yaml` 或 `Chart.lock` 中显式固定；升级时通过重新下载同路径覆盖或按项目约定流程执行，仍不得在 dependencies 下手改 Chart 内容。
+
+AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/dependencies/` 下 Chart 文件，应提示该限制并建议改用 values 覆盖或更新流程。
