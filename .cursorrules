@@ -4,6 +4,16 @@
 
 ---
 
+## deploy-engine 子模块 — 禁止直接修改
+
+- **禁止**：在 **diting-infra 仓库内直接修改 `deploy-engine/` 目录下的任何文件**（包括但不限于 `pkg/`、`cmd/`、`deploy/`、`config/` 等）。deploy-engine 在本仓内为 **Git 子模块**，其源码真相源为 **deploy-engine 独立仓库**。
+- **唯一允许的更新方式**：
+  1. 在 **deploy-engine 独立仓库**中修改代码并推送到远程；
+  2. 在 **diting-infra** 中通过子模块同步拉取更改，例如：`git submodule update --init --remote deploy-engine`（或本仓 Makefile 约定的 `make update-deploy-engine`）。
+- **AI 行为**：若用户请求修改 diting-infra 内的 `deploy-engine/` 下文件，须**拒绝直接修改**，并提示：请在 deploy-engine 仓库中修改 → 推送远程 → 在 diting-infra 根目录执行 `make update-deploy-engine`（或 `git submodule update --init --remote deploy-engine`）同步更改。
+
+---
+
 ## charts/dependencies 目录 — 禁止直接修改 Chart
 
 - **禁止**：在 **`charts/dependencies/`** 目录下**直接更改、添加或修改**任一 Chart 的内容（包括但不限于 `templates/`、`Chart.yaml`、`values.yaml` 等 Chart 内文件）。Chart 须从官方/上游下载到本地后**原样存放**使用。

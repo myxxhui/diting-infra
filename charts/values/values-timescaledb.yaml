@@ -1,0 +1,4 @@
+# Stage2-01 TimescaleDB values 覆盖；镜像 tag 固定，与 dna_stage2_01.pinned_versions 一致
+# 部署时：helm install -f charts/values/values-timescaledb.yaml ...
+image:
+  tag: pg14.6-ts2.9.1-p1

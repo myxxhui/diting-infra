@@ -1,0 +1,42 @@
+# Stage2-01 Schema init Job（dna_stage2_01.schema_init.job_name: diting-schema-init）
+# 执行前须：1) 创建 ConfigMap diting-schema-init-sql（见 jobs/README.md）；2) 存在 Secret diting-db-connection（TIMESCALE_DSN、PG_L2_DSN）
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: diting-schema-init
+  namespace: default
+  labels:
+    app.kubernetes.io/name: diting-schema-init
+    app.kubernetes.io/component: schema-init
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: diting-schema-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: schema-init
+          image: bitnami/postgresql:16.0.0-debian-11-r13
+          command: ["/bin/sh", "/sql/run-schema-init.sh"]
+          env:
+            - name: TIMESCALE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: diting-db-connection
+                  key: TIMESCALE_DSN
+            - name: PG_L2_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: diting-db-connection
+                  key: PG_L2_DSN
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: sql
+          configMap:
+            name: diting-schema-init-sql
