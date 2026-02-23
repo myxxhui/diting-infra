@@ -2,3 +2,8 @@
 # 部署时：helm install -f charts/values/values-timescaledb.yaml ...
 image:
   tag: pg14.6-ts2.9.1-p1
+replicaCount: 1
+service:
+  primary:
+    type: NodePort
+    nodePort: 30432

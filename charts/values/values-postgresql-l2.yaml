@@ -1,3 +1,8 @@
-# Stage2-01 PostgreSQL (L2 知识库) values 覆盖；镜像 tag 固定
+# Stage2-01 PostgreSQL (L2 知识库) values 覆盖；镜像 tag 固定（原 tag 已下架，使用 16.2.0）
 image:
-  tag: 16.0.0-debian-11-r13
+  tag: 16.2.0-debian-12-r0
+primary:
+  service:
+    type: NodePort
+    nodePorts:
+      postgresql: 30433

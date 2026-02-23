@@ -19,7 +19,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: schema-init
-          image: bitnami/postgresql:16.0.0-debian-11-r13
+          image: timescale/timescaledb-ha:pg14.6-ts2.9.1-p1  # 与 TimescaleDB Chart 一致；Bitnami 镜像连接 TimescaleDB 有 scram 兼容问题
           command: ["/bin/sh", "/sql/run-schema-init.sh"]
           env:
             - name: TIMESCALE_DSN

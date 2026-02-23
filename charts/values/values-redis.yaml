@@ -1,3 +1,8 @@
-# Stage2-01 Redis values 覆盖；镜像 tag 固定
+# Stage2-01 Redis values 覆盖；镜像 tag 固定（7.2.0-debian-11-r0 已下架，使用 7.2.5）
 image:
-  tag: 7.2.0-debian-11-r0
+  tag: 7.2.5-debian-12-r0
+master:
+  service:
+    type: NodePort
+    nodePorts:
+      redis: 30379
