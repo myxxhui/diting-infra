@@ -40,3 +40,27 @@ stage2-01-full-down: stage2-01-down
 	@echo "[Stage2-01] 回收 ECS/K3s..."
 	@$(MAKE) down
 	@echo "[Stage2-01] 完整清理完成（K3s + ECS）"
+
+# ---------- Stage2 本地实践：Docker Compose 提供 L1/L2（02_三位一体：部署归属 infra）----------
+# 在 diting-infra 执行 up/init 后，在 diting-core 配置 .env 指向 localhost:15432/15433 并执行 verify-db-connection、ingest-test
+COMPOSE_INGEST = docker compose -f compose/docker-compose.ingest.yaml
+COMPOSE_NETWORK = diting-infra_default
+LOCAL_SCRIPTS = $(CURDIR)/scripts/local
+
+.PHONY: local-deps-up local-deps-down local-deps-init
+
+local-deps-up:
+	@$(COMPOSE_INGEST) up -d && echo "等待 L1/L2 就绪..." && sleep 6
+
+local-deps-down:
+	@$(COMPOSE_INGEST) down
+	@echo "local-deps-down OK（L1/L2 已回收）"
+
+local-deps-init:
+	@echo "初始化 L1 ohlcv 表..."
+	@docker run --rm --network $(COMPOSE_NETWORK) -v "$(LOCAL_SCRIPTS):/scripts" postgres:15-alpine \
+		psql "postgresql://postgres:postgres@l1:5432/postgres" -v ON_ERROR_STOP=1 -f /scripts/init_l1_ohlcv_local.sql
+	@echo "初始化 L2 data_versions 表..."
+	@docker run --rm --network $(COMPOSE_NETWORK) -v "$(LOCAL_SCRIPTS):/scripts" postgres:15-alpine \
+		psql "postgresql://postgres:postgres@l2:5432/diting_l2" -v ON_ERROR_STOP=1 -f /scripts/init_l2_data_versions_local.sql
+	@echo "local-deps-init OK（请在 diting-core 配置 .env 后执行 make verify-db-connection、make ingest-test）"
