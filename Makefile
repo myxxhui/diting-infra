@@ -43,6 +43,7 @@ stage2-01-full-down: stage2-01-down
 
 # ---------- Stage2 本地实践：Docker Compose 提供 L1/L2（02_三位一体：部署归属 infra）----------
 # 在 diting-infra 执行 up/init 后，在 diting-core 配置 .env 指向 localhost:15432/15433 并执行 verify-db-connection、ingest-test
+# 网络名随 compose 驱动不同可能为 diting-infra_default（docker compose 从本仓根目录 up）或 compose_default（部分 podman-compose）；若 init 报错可覆盖 COMPOSE_NETWORK=compose_default make local-deps-init
 COMPOSE_INGEST = docker compose -f compose/docker-compose.ingest.yaml
 COMPOSE_NETWORK = diting-infra_default
 LOCAL_SCRIPTS = $(CURDIR)/scripts/local
