@@ -1,0 +1,29 @@
+# ==============================================================================
+# 生产环境（diting prod）Terraform 变量 - 示例
+# ==============================================================================
+# 用法：复制为 config/terraform-diting-prod.tfvars 后本地填写。
+# 勿将含 instance_password 的 tfvars 提交到远程；请用环境变量注入：
+#   export TF_VAR_instance_password='你的密码'
+# 用于 make deploy diting prod / make down diting prod。
+# ==============================================================================
+
+env_id            = "prod"
+region            = "cn-hongkong"
+instance_type     = "ecs.u1-c1m4.xlarge"
+# instance_password：勿写在此文件并提交；使用 export TF_VAR_instance_password='...' 注入
+vpc_cidr          = "10.0.0.0/16"
+vswitch_cidr      = "10.0.1.0/24"
+enable_spot       = true
+spot_strategy     = "SpotAsPriceGo"
+spot_price_limit  = 0.5
+eip_bandwidth     = 100
+disk_category     = "cloud_essd"
+# Stage2-06 前半部分：独立数据盘
+enable_prod_data_disk = true
+data_disk_size        = 100
+data_disk_category    = "cloud_essd"
+# use_existing_data_disk_id 由 Make 在再次 Up 时从 prod.disk_id 注入（TF_VAR_use_existing_data_disk_id）
+oss_bucket_name   = "deploy-engine-k3s-storage"
+oss_bucket_acl    = "public-read-write"
+init_script_acl   = "public-read"
+# ram_role_name   = "diting-ecs-oss-read"

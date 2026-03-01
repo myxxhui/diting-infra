@@ -21,9 +21,10 @@ make local-deps-init
 
 在 **diting-core 根目录**：
 
-1. 复制 `.env.template` 为 `.env`，填写：
+1. 复制 **diting-core** 的 `.env.template` 为 `.env`，填写必填三项（完整键见 diting-core 根目录 `.env.template`）：
    - `TIMESCALE_DSN=postgresql://postgres:postgres@localhost:15432/postgres`
    - `PG_L2_DSN=postgresql://postgres:postgres@localhost:15433/diting_l2`
+   - `REDIS_URL=redis://localhost:15479/0`
 2. 安装依赖（可选，若在镜像内验证则不需要）：`pip install -r requirements-ingest.txt`
 3. 执行：
    ```bash

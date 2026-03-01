@@ -17,8 +17,9 @@ diting-infra/
 │       └── README.md
 │
 ├── config/                    # 配置文件目录（环境配置、部署控制）
-│   ├── terraform-diting-prod.tfvars    # Terraform 变量（云资源）
-│   ├── diting-prod.yaml                # 部署控制配置（K3s、数据库）
+│   ├── README.md              # 配置说明（拉代码后必读）
+│   ├── terraform-diting-prod.tfvars.example  # 生产 tfvars 示例（复制为 terraform-diting-prod.tfvars 后本地填写，勿提交含密码的 tfvars）
+│   ├── diting-prod.yaml       # 部署控制配置（K3s、数据库）
 │   └── ...
 │
 ├── scripts/                   # 脚本目录（辅助工具、连接信息）
@@ -64,7 +65,7 @@ diting-infra/
 - ❌ **不要**：在这里存放脚本（应放在 `scripts/`）
 
 **文件类型**：
-- `terraform-*.tfvars`：Terraform 变量（云资源配置）
+- `terraform-*.tfvars`：Terraform 变量（云资源配置）。**生产环境**：勿提交含 `instance_password` 的 `terraform-diting-prod.tfvars`，请复制 `terraform-diting-prod.tfvars.example` 为同名文件后本地填写，并用 `export TF_VAR_instance_password='...'` 注入密码（详见 `config/README.md`）。
 - `*-prod.yaml`、`*-dev.yaml`：部署控制配置（K3s、数据库）
 
 ### 🔧 scripts/ - 脚本
