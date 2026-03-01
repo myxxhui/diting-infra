@@ -1,6 +1,7 @@
-# Stage2 本地实践用 L1/L2 [Ref: diting-doc/04_阶段规划与实践/Stage2_数据采集与存储]
+# Stage2 本地实践用 L1/L2/Redis [Ref: diting-doc/04_阶段规划与实践/Stage2_数据采集与存储]
 # 归属 diting-infra：部署与编排由 infra 负责，与 diting-core 严格区分（02_三位一体仓库规约）
-# 用于无 K3s 时在本地跑通 diting-core 的 make verify-db-connection 与 make ingest-test
+# 用于无 K3s 时在本地跑通 diting-core 的 make verify diting prod 与 make ingest-test
+# L1/L2 均为 PostgreSQL 系（L1=TimescaleDB/PG，L2=PostgreSQL）；Redis 默认部署、必验（11_ 规约）
 
 services:
   l1:
@@ -26,6 +27,15 @@ services:
       - "15433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d diting_l2"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "15479:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 5s
       retries: 10

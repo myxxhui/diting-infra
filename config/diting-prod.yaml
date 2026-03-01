@@ -1,0 +1,35 @@
+# ==============================================================================
+# 生产环境（diting prod）部署配置
+# ==============================================================================
+# 用于 make deploy diting prod / make down diting prod；与 06_生产级数据要求_实践 一致。
+# 部署哪些服务（PG/Redis 等）、K3s 存储插件及 PG/Redis 存储由本文件控制。
+# ==============================================================================
+
+global:
+  project_name: "diting"
+  k3s:
+    apiServer:
+      domain: "k3s-diting-prod.example.com"
+
+# 部署控制：由 diting-infra / deploy-engine 读取，决定是否部署各组件及存储配置
+deploy_control:
+  # 是否部署 TimescaleDB（L1）
+  enable_timescaledb: true
+  # 是否部署 PostgreSQL L2
+  enable_postgres_l2: true
+  # 是否部署 Redis
+  enable_redis: true
+  # K3s 默认存储插件（local-path / nfs-client 等）
+  k3s_storage_plugin: "local-path"
+  # TimescaleDB/L1 存储（与 Helm values 对应）
+  timescaledb_storage:
+    size: "50Gi"
+    storage_class: ""
+  # PostgreSQL L2 存储
+  postgres_l2_storage:
+    size: "20Gi"
+    storage_class: ""
+  # Redis 存储
+  redis_storage:
+    size: "10Gi"
+    storage_class: ""

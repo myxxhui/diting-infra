@@ -4,13 +4,15 @@
 
 ---
 
-## deploy-engine 子模块 — 禁止直接修改
+## deploy-engine 子模块 — 禁止在子模块拷贝内做任何“写”操作
 
-- **禁止**：在 **diting-infra 仓库内直接修改 `deploy-engine/` 目录下的任何文件**（包括但不限于 `pkg/`、`cmd/`、`deploy/`、`config/` 等）。deploy-engine 在本仓内为 **Git 子模块**，其源码真相源为 **deploy-engine 独立仓库**。
+- **禁止**：在 **diting-infra 仓库内的 `deploy-engine/` 目录下进行任何会改变其 Git 状态或工作树的操作**，包括但不限于：编辑/添加/修改文件，`git add/commit/push`，**`git stash`**。deploy-engine 在本仓内为 **Git 子模块**，真相源为 **deploy-engine 独立仓库**；在子模块拷贝内 stash/commit 会污染该拷贝、影响后续 `make update-deploy-engine` 或 pull main，视为**违规**（见 diting-doc 00_系统规则 §九）。
 - **唯一允许的更新方式**：
-  1. 在 **deploy-engine 独立仓库**中修改代码并推送到远程；
-  2. 在 **diting-infra** 中通过子模块同步拉取更改，例如：`git submodule update --init --remote deploy-engine`（或本仓 Makefile 约定的 `make update-deploy-engine`）。
-- **AI 行为**：若用户请求修改 diting-infra 内的 `deploy-engine/` 下文件，须**拒绝直接修改**，并提示：请在 deploy-engine 仓库中修改 → 推送远程 → 在 diting-infra 根目录执行 `make update-deploy-engine`（或 `git submodule update --init --remote deploy-engine`）同步更改。
+  1. 在 **deploy-engine 独立仓库**（与 diting-infra 平级的 `deploy-engine/` 根目录）中修改、stash/commit、推送到远程；
+  2. 在 **diting-infra** 中**仅**通过子模块同步拉取：`make update-deploy-engine` 或 `git submodule update --init --remote deploy-engine`。
+- **正确做法（需暂存或提交修改时）**：到 **deploy-engine 独立仓库** 根目录执行 `git stash` 或 `git commit`，再在 diting-infra 执行 `make update-deploy-engine`；**不得**在 `diting-infra/deploy-engine/` 内执行 stash/commit。
+- **AI 执行前自检**：凡待改路径在 `diting-infra/deploy-engine/` 下或需在该目录内执行 git 写命令（含 stash）时，**不得在本仓子模块内执行**，须改为在 deploy-engine 独立仓库内操作，再在本仓执行 `make update-deploy-engine`。
+- **AI 行为**：若用户请求在 diting-infra 内修改或操作（含 stash）`deploy-engine/` 下内容，须**拒绝在子模块内执行**，并提示：请到 deploy-engine 独立仓库中修改/stash/commit → 推送远程 → 在 diting-infra 根目录执行 `make update-deploy-engine` 同步更改。
 
 ---
 
