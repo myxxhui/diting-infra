@@ -1,0 +1,6 @@
+apiVersion: v2
+name: diting-stack
+description: Diting 完整技术栈部署 Chart（存储 + 数据库）
+type: application
+version: 0.1.0
+appVersion: "1.0"

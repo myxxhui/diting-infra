@@ -16,8 +16,9 @@ STATE_FILE="${ENGINE_ROOT}/${DEPLOY_ENGINE_DIR}/.deploy/state-${PROJECT}-${ENV}.
 KUBECONFIG_PATH="${HOME}/.kube/config-${PROJECT}-${ENV}"
 
 PUBLIC_IP=""
-if [ -f "$STATE_FILE" ] && [ -d "$TF_DIR" ]; then
-  PUBLIC_IP=$(cd "$TF_DIR" && terraform output -state="$STATE_FILE" -raw public_ip 2>/dev/null || true)
+if [ -d "$TF_DIR" ]; then
+  # Terraform 使用 backend local，直接读取 terraform.tfstate
+  PUBLIC_IP=$(cd "$TF_DIR" && terraform output -raw public_ip 2>/dev/null || true)
 fi
 if [ -z "$PUBLIC_IP" ]; then
   PUBLIC_IP="<EIP>"
@@ -26,8 +27,8 @@ fi
 # Stage2-06 前半部分：独立数据盘 ID 持久化（Down 保留盘后再次 Up 时由 Make 注入 TF_VAR_use_existing_data_disk_id）
 DISK_ID_FILE="${ENGINE_ROOT}/${ENV}.disk_id"
 DATA_DISK_ID=""
-if [ -f "$STATE_FILE" ] && [ -d "$TF_DIR" ]; then
-  DATA_DISK_ID=$(cd "$TF_DIR" && terraform output -state="$STATE_FILE" -raw data_disk_id 2>/dev/null || true)
+if [ -d "$TF_DIR" ]; then
+  DATA_DISK_ID=$(cd "$TF_DIR" && terraform output -raw data_disk_id 2>/dev/null || true)
 fi
 if [ -n "$DATA_DISK_ID" ] && [ "$DATA_DISK_ID" != "" ]; then
   printf '%s' "$DATA_DISK_ID" > "$DISK_ID_FILE"

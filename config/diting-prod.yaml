@@ -1,8 +1,8 @@
 # ==============================================================================
 # 生产环境（diting prod）部署配置
 # ==============================================================================
-# 用于 make deploy diting prod / make down diting prod；与 06_生产级数据要求_实践 一致。
-# 部署哪些服务（PG/Redis 等）、K3s 存储插件及 PG/Redis 存储由本文件控制。
+# make deploy diting prod / make down diting prod 由此文件驱动。
+# diting-stack：仅创建静态 PV/PVC（数据继承）；数据库使用官方 Bitnami Chart 部署。
 # ==============================================================================
 
 global:
@@ -11,25 +11,75 @@ global:
     apiServer:
       domain: "k3s-diting-prod.example.com"
 
-# 部署控制：由 diting-infra / deploy-engine 读取，决定是否部署各组件及存储配置
+# deploy-engine 用：不在此处部署数据库，由 deploy-stack.sh 用官方 Chart 部署
 deploy_control:
-  # 是否部署 TimescaleDB（L1）
-  enable_timescaledb: true
-  # 是否部署 PostgreSQL L2
-  enable_postgres_l2: true
-  # 是否部署 Redis
-  enable_redis: true
-  # K3s 默认存储插件（local-path / nfs-client 等）
+  enable_timescaledb: false
+  enable_postgres_l2: false
+  enable_redis: false
   k3s_storage_plugin: "local-path"
-  # TimescaleDB/L1 存储（与 Helm values 对应）
-  timescaledb_storage:
-    size: "50Gi"
-    storage_class: ""
-  # PostgreSQL L2 存储
-  postgres_l2_storage:
-    size: "20Gi"
-    storage_class: ""
-  # Redis 存储
-  redis_storage:
-    size: "10Gi"
-    storage_class: ""
+
+# Diting Stack：1) 静态存储 Chart  2) 数据库由脚本用官方 Chart 部署
+stack:
+  enabled: true
+  chart_path: "charts/diting-stack"
+  release_name: "diting-stack"
+  namespace: "default"
+
+  # 仅静态 PV/PVC + 初始化 Job（与 diting-stack Chart values 同构）
+  storage:
+    dataPath: /mnt/titan-data/postgres
+    timescaledb:
+      enabled: true
+      pv:
+        name: timescaledb-data-pv
+        capacity: 50Gi
+        subPath: timescaledb
+        reclaimPolicy: Retain
+      pvc:
+        name: data-timescaledb-postgresql-0
+        namespace: default
+        accessMode: ReadWriteOnce
+        storageRequest: 50Gi
+    postgresL2:
+      enabled: true
+      pv:
+        name: postgresql-l2-data-pv
+        capacity: 20Gi
+        subPath: postgresql-l2
+        reclaimPolicy: Retain
+      pvc:
+        name: data-postgresql-l2-0
+        namespace: default
+        accessMode: ReadWriteOnce
+        storageRequest: 20Gi
+
+  # 数据库部署参数（供脚本调用 bitnami/postgresql、bitnami/redis 使用）
+  databases:
+    timescaledb:
+      enabled: true
+      auth:
+        username: postgres
+        password: postgres
+        database: postgres
+      persistence:
+        existing_claim: "data-timescaledb-postgresql-0"
+    postgres_l2:
+      enabled: true
+      auth:
+        username: postgres
+        password: postgres
+        database: diting_l2
+      persistence:
+        existing_claim: "data-postgresql-l2-0"
+    redis:
+      enabled: true
+      auth_enabled: false
+      persistence:
+        size: "10Gi"
+        storage_class: "local-path"
+
+# 后半部分：Up 后是否执行数据采集
+data_ingestion:
+  enabled: true
+  target: "ingest-test"
+  core_repo_path: ""

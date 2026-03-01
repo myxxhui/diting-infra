@@ -1,0 +1,26 @@
+{{- if .Values.storage.postgresL2.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.storage.postgresL2.pv.name }}
+  labels:
+    app: diting
+    component: postgresql-l2
+    type: static-storage
+spec:
+  capacity:
+    storage: {{ .Values.storage.postgresL2.pv.capacity }}
+  accessModes:
+    - {{ .Values.storage.postgresL2.pvc.accessMode }}
+  persistentVolumeReclaimPolicy: {{ .Values.storage.postgresL2.pv.reclaimPolicy }}
+  storageClassName: ""
+  hostPath:
+    path: {{ .Values.storage.dataPath }}/{{ .Values.storage.postgresL2.pv.subPath }}
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: Exists
+{{- end }}

@@ -139,7 +139,89 @@ deploy-diting-prod: update-deploy-engine
 		fi; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@echo ""
+	@echo "=========================================="
+	@echo "  部署 Diting Stack（静态 PV/PVC）"
+	@echo "=========================================="
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
+	STACK_ENABLED=$$(yq eval '.stack.enabled // true' "$$CFG"); \
+	if [ "$$STACK_ENABLED" = "true" ]; then \
+		TMP=$$(mktemp); \
+		yq eval '{"storage": .stack.storage}' "$$CFG" > "$$TMP"; \
+		if helm list -n default | grep -q diting-stack; then \
+			helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
+		else \
+			helm install diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
+		fi; \
+		rm -f "$$TMP"; \
+		echo "✅ Diting Stack（存储）部署完成"; \
+	fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  部署数据库（官方 Bitnami Chart）"
+	@echo "=========================================="
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
+	helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true; \
+	helm repo update bitnami; \
+	if [ "$$(yq eval '.stack.databases.timescaledb.enabled // true' "$$CFG")" = "true" ]; then \
+		echo "部署 TimescaleDB..."; \
+		helm upgrade --install timescaledb bitnami/postgresql -n default \
+			--set auth.username=$$(yq eval '.stack.databases.timescaledb.auth.username // "postgres"' "$$CFG") \
+			--set auth.password=$$(yq eval '.stack.databases.timescaledb.auth.password // "postgres"' "$$CFG") \
+			--set auth.database=$$(yq eval '.stack.databases.timescaledb.auth.database // "postgres"' "$$CFG") \
+			--set primary.persistence.enabled=true \
+			--set primary.persistence.existingClaim=$$(yq eval '.stack.databases.timescaledb.persistence.existing_claim // "data-timescaledb-postgresql-0"' "$$CFG") \
+			--wait --timeout=5m; \
+		echo "✅ TimescaleDB 完成"; \
+	fi; \
+	if [ "$$(yq eval '.stack.databases.postgres_l2.enabled // true' "$$CFG")" = "true" ]; then \
+		echo "部署 PostgreSQL L2..."; \
+		helm upgrade --install postgresql-l2 bitnami/postgresql -n default \
+			--set auth.username=$$(yq eval '.stack.databases.postgres_l2.auth.username // "postgres"' "$$CFG") \
+			--set auth.password=$$(yq eval '.stack.databases.postgres_l2.auth.password // "postgres"' "$$CFG") \
+			--set auth.database=$$(yq eval '.stack.databases.postgres_l2.auth.database // "diting_l2"' "$$CFG") \
+			--set primary.persistence.enabled=true \
+			--set primary.persistence.existingClaim=$$(yq eval '.stack.databases.postgres_l2.persistence.existing_claim // "data-postgresql-l2-0"' "$$CFG") \
+			--wait --timeout=5m; \
+		echo "✅ PostgreSQL L2 完成"; \
+	fi; \
+	if [ "$$(yq eval '.stack.databases.redis.enabled // true' "$$CFG")" = "true" ]; then \
+		echo "部署 Redis..."; \
+		helm upgrade --install redis bitnami/redis -n default \
+			--set auth.enabled=$$(yq eval '.stack.databases.redis.auth_enabled // false' "$$CFG") \
+			--set master.persistence.enabled=true \
+			--set master.persistence.size=$$(yq eval '.stack.databases.redis.persistence.size // "10Gi"' "$$CFG") \
+			--set master.persistence.storageClass=$$(yq eval '.stack.databases.redis.persistence.storage_class // "local-path"' "$$CFG") \
+			--set volumePermissions.enabled=true \
+			--wait --timeout=5m; \
+		echo "✅ Redis 完成"; \
+	fi
 	@$(MAKE) -f $(CURDIR)/Makefile prod-write-conn
+	@echo ""
+	@echo "=========================================="
+	@echo "  执行数据采集（后半部分）"
+	@echo "=========================================="
+	@INGEST_ENABLED=$$(yq eval '.data_ingestion.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+	if [ "$$INGEST_ENABLED" = "true" ]; then \
+		INGEST_TARGET=$$(yq eval '.data_ingestion.target // "ingest-test"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		CORE_REPO=$$(yq eval '.data_ingestion.core_repo_path // ""' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		if [ -z "$$CORE_REPO" ]; then \
+			CORE_REPO="$${REPO_I_ROOT:-}"; \
+		fi; \
+		if [ -n "$$CORE_REPO" ] && [ -d "$$CORE_REPO" ]; then \
+			echo "执行数据采集: $$INGEST_TARGET (工作目录: $$CORE_REPO)"; \
+			cp "$(CONN_FILE)" "$$CORE_REPO/.env" && \
+			$(MAKE) -C "$$CORE_REPO" "$$INGEST_TARGET" && \
+			echo "✅ 数据采集完成"; \
+		else \
+			echo "⚠️  REPO_I_ROOT 未设置或目录不存在，跳过数据采集"; \
+			echo "   设置方法: export REPO_I_ROOT=/path/to/diting-core"; \
+		fi; \
+	else \
+		echo "数据采集已禁用（data_ingestion.enabled=false），跳过"; \
+	fi
 	@echo ""
 	@echo "=========================================="
 	@echo "  ✅ 部署完成！"
@@ -177,6 +259,39 @@ deploy-diting-prod-with-ingest: deploy-diting-prod
 # 注意：deploy-engine 的 -state= 指向的是编排用 JSON，Terraform 实际使用 deploy/terraform/alicloud/terraform.tfstate（backend local）
 # make down diting prod 的实际执行 target
 down-diting-prod:
+	@echo ""
+	@echo "=========================================="
+	@echo "  卸载数据库 Release（官方 Chart）"
+	@echo "=========================================="
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	if kubectl cluster-info &>/dev/null; then \
+		for r in timescaledb postgresql-l2 redis; do helm uninstall "$$r" -n default 2>/dev/null || true; done; \
+		echo "等待 Pod 终止..."; sleep 10; \
+		echo "✅ 数据库 Release 已卸载"; \
+	else \
+		echo "⚠️  集群不可访问，跳过"; \
+	fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  清理动态 PVC（保留静态 PVC）"
+	@echo "=========================================="
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	if kubectl cluster-info &>/dev/null; then \
+		echo "删除 Redis 动态 PVC..."; \
+		kubectl delete pvc -n default -l app.kubernetes.io/instance=redis --ignore-not-found=true || true; \
+		echo "✅ 动态 PVC 已清理"; \
+	fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  卸载 Diting Stack（仅静态 PV/PVC）"
+	@echo "=========================================="
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	if kubectl cluster-info &>/dev/null; then \
+		STACK_RELEASE=$$(yq eval '.stack.release_name // "diting-stack"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		STACK_NS=$$(yq eval '.stack.namespace // "default"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		helm uninstall "$$STACK_RELEASE" -n "$$STACK_NS" 2>/dev/null || true; \
+		echo "✅ Diting Stack 已卸载"; \
+	fi
 	@if [ "$${FULL_DESTROY:-0}" = "1" ]; then \
 		_TF="$(CURDIR)/$(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud"; \
 		_TF_STATE="$$_TF/terraform.tfstate"; \

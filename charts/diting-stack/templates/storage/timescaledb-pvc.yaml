@@ -1,0 +1,19 @@
+{{- if .Values.storage.timescaledb.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.timescaledb.pvc.name }}
+  namespace: {{ .Values.storage.timescaledb.pvc.namespace }}
+  labels:
+    app: diting
+    component: timescaledb
+    type: static-storage
+spec:
+  accessModes:
+    - {{ .Values.storage.timescaledb.pvc.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.timescaledb.pvc.storageRequest }}
+  storageClassName: ""
+  volumeName: {{ .Values.storage.timescaledb.pv.name }}
+{{- end }}

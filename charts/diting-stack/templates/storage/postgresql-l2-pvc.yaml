@@ -1,0 +1,19 @@
+{{- if .Values.storage.postgresL2.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.postgresL2.pvc.name }}
+  namespace: {{ .Values.storage.postgresL2.pvc.namespace }}
+  labels:
+    app: diting
+    component: postgresql-l2
+    type: static-storage
+spec:
+  accessModes:
+    - {{ .Values.storage.postgresL2.pvc.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.postgresL2.pvc.storageRequest }}
+  storageClassName: ""
+  volumeName: {{ .Values.storage.postgresL2.pv.name }}
+{{- end }}

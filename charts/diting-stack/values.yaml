@@ -1,0 +1,31 @@
+# Diting Stack - 仅包含静态存储（PV/PVC）及初始化 Job
+# 通过 diting-prod.yaml 中的 stack.storage 覆盖
+
+storage:
+  dataPath: /mnt/titan-data/postgres
+  
+  timescaledb:
+    enabled: true
+    pv:
+      name: timescaledb-data-pv
+      capacity: 50Gi
+      subPath: timescaledb
+      reclaimPolicy: Retain
+    pvc:
+      name: data-timescaledb-postgresql-0
+      namespace: default
+      accessMode: ReadWriteOnce
+      storageRequest: 50Gi
+  
+  postgresL2:
+    enabled: true
+    pv:
+      name: postgresql-l2-data-pv
+      capacity: 20Gi
+      subPath: postgresql-l2
+      reclaimPolicy: Retain
+    pvc:
+      name: data-postgresql-l2-0
+      namespace: default
+      accessMode: ReadWriteOnce
+      storageRequest: 20Gi
