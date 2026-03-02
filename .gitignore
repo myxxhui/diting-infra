@@ -4,3 +4,6 @@ prod.disk_id
 
 # 生产 Terraform 变量（含 instance_password 等敏感项；请用 config/terraform-diting-prod.tfvars.example 复制后本地填写，并用 TF_VAR_instance_password 注入密码）
 config/terraform-diting-prod.tfvars
+
+# ACR 拉取凭证（含密码）；若需重建请参考 charts/diting-stack/manifests/acr-pull-secret.yaml.example
+charts/diting-stack/manifests/acr-pull-secret.yaml

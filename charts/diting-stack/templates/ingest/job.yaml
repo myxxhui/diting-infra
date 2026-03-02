@@ -1,0 +1,44 @@
+{{- if .Values.ingest.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: diting-ingest
+  namespace: default
+  labels:
+    app: diting
+    component: ingest
+  annotations:
+    # 与 storage-init 错开：init 用 -5，采集用 5，确保 DB 就绪后再跑
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: {{ .Values.ingest.ttlSecondsAfterFinished }}
+  backoffLimit: {{ .Values.ingest.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app: diting
+        component: ingest
+    spec:
+      {{- with .Values.ingest.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: OnFailure
+      containers:
+      - name: ingest
+        image: "{{ .Values.ingest.image.repository }}:{{ .Values.ingest.image.tag }}"
+        imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+        # 每次部署：检查 L1 是否为空/过期，自动全量或增量（见 diting-core scripts/run_ingest_deploy.py）
+        command: ["make", "ingest-deploy"]
+        envFrom:
+        - secretRef:
+            name: diting-ingest-conn
+        env:
+        - name: INGEST_DEPLOY_FULL_DAYS_THRESHOLD
+          value: {{ .Values.ingest.fullDaysThreshold | quote }}
+        resources: {{- toYaml .Values.ingest.resources | nindent 8 }}
+      {{- with .Values.ingest.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

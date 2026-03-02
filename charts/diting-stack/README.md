@@ -14,13 +14,12 @@ diting-stack/
 ├── Chart.yaml
 ├── values.yaml
 ├── README.md
+├── manifests/             # 与本 Chart 配套、需单独 kubectl apply 的 K8s 资源（如 ACR 拉取凭证）
+│   ├── acr-pull-secret.yaml         # 含凭证，已 .gitignore
+│   └── acr-pull-secret.yaml.example
 └── templates/
-    └── storage/           # 仅存储相关
-        ├── timescaledb-pv.yaml
-        ├── timescaledb-pvc.yaml
-        ├── postgresql-l2-pv.yaml
-        ├── postgresql-l2-pvc.yaml
-        └── init-job.yaml   # hostPath 目录创建与权限
+    ├── storage/           # 静态 PV/PVC 与 init-job
+    └── ingest/            # 采集 Job 与连接 Secret
 ```
 
 ## 部署流程（Make 直接调用 Helm，无脚本）

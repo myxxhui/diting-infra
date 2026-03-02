@@ -1,5 +1,42 @@
-# Diting Stack - 仅包含静态存储（PV/PVC）及初始化 Job
-# 通过 diting-prod.yaml 中的 stack.storage 覆盖
+# Diting Stack - 仅包含静态存储（PV/PVC）、初始化 Job、采集 Job（云原生）
+# 通过 diting-prod.yaml 中的 stack.storage / stack.ingest 覆盖
+
+# 采集模块（Job）：集群内运行 diting-ingest 镜像，连接信息由 Secret 注入
+ingest:
+  enabled: false
+  # 生产环境（config/diting-prod.yaml）覆盖为项目 ACR + tag latest，本地构建后 make push-images 推送
+  image:
+    repository: diting-ingest
+    tag: test
+    pullPolicy: IfNotPresent
+  # 私有 ACR 拉取凭证（如阿里云个人版）；创建：kubectl create secret docker-registry acr-titan --docker-server=crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com --docker-username=sean_hui --docker-password=<密码>
+  imagePullSecrets: []
+  # 集群内 Service DNS（Bitnami PostgreSQL/Redis 默认服务名）
+  timescaleHost: "timescaledb-primary.default.svc.cluster.local"
+  timescalePort: "5432"
+  postgresL2Host: "postgresql-l2-primary.default.svc.cluster.local"
+  postgresL2Port: "5432"
+  redisHost: "redis-master.default.svc.cluster.local"
+  redisPort: "6379"
+  # 与 stack.databases 中 auth 一致
+  timescaleUser: "postgres"
+  timescalePassword: "postgres"
+  timescaleDatabase: "postgres"
+  postgresL2User: "postgres"
+  postgresL2Password: "postgres"
+  postgresL2Database: "diting_l2"
+  # 部署时检查：超过此天数未更新则全量，否则增量；见 run_ingest_deploy.py
+  fullDaysThreshold: 7
+  # 一次性 Job：backoffLimit
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "1"
 
 storage:
   dataPath: /mnt/titan-data/postgres

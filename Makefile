@@ -87,7 +87,7 @@ PROD_DATA_ENV_ENV     = prod
 CONN_FILE             = $(CURDIR)/prod.conn
 DISK_ID_FILE          = $(CURDIR)/prod.disk_id
 
-.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn
+.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret
 
 # 兼容旧命令（推荐使用 make deploy diting prod / make down diting prod）
 deploy-data-db-prod: deploy-diting-prod
@@ -144,11 +144,16 @@ deploy-diting-prod: update-deploy-engine
 	@echo "  部署 Diting Stack（静态 PV/PVC）"
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	ACR_SECRET="$(CURDIR)/charts/diting-stack/manifests/acr-pull-secret.yaml"; \
+	if [ -f "$$ACR_SECRET" ]; then \
+		echo "应用 ACR 拉取凭证 Secret..."; \
+		kubectl apply -f "$$ACR_SECRET"; \
+	fi; \
 	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
 	STACK_ENABLED=$$(yq eval '.stack.enabled // true' "$$CFG"); \
 	if [ "$$STACK_ENABLED" = "true" ]; then \
 		TMP=$$(mktemp); \
-		yq eval '{"storage": .stack.storage}' "$$CFG" > "$$TMP"; \
+		yq eval '{"storage": .stack.storage, "ingest": (.stack.ingest // {})}' "$$CFG" > "$$TMP"; \
 		if helm list -n default | grep -q diting-stack; then \
 			helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
 		else \
@@ -244,6 +249,15 @@ deploy-diting-prod: update-deploy-engine
 prod-write-conn:
 	@scripts/prod-write-conn.sh "$(CONFIG_ROOT)" "$(DEPLOY_ENGINE_DIR)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 	@echo "连接信息已写入 $(CONN_FILE)（若脚本未实现则需人工填写 EIP 与 NodePort）"
+
+# 将 ACR 拉取凭证 Secret 应用到当前 KUBECONFIG 指向的集群（default 命名空间）
+# 需存在 charts/diting-stack/manifests/acr-pull-secret.yaml；make deploy diting prod 时若存在该文件会自动 apply
+apply-acr-pull-secret:
+	@ACR_SECRET="$(CURDIR)/charts/diting-stack/manifests/acr-pull-secret.yaml"; \
+	if [ ! -f "$$ACR_SECRET" ]; then \
+		echo "错误: 不存在 $$ACR_SECRET，请从同目录 acr-pull-secret.yaml.example 复制并填写或使用项目提供的凭证文件"; exit 1; \
+	fi; \
+	kubectl apply -f "$$ACR_SECRET" && echo "✅ ACR 拉取凭证已应用（Secret acr-titan）"
 
 # 后半部分：Up 后执行采集落库（C3）。需设置 REPO_I_ROOT 指向 diting-core 根目录
 deploy-diting-prod-with-ingest: deploy-diting-prod

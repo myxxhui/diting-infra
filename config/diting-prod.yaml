@@ -53,6 +53,23 @@ stack:
         accessMode: ReadWriteOnce
         storageRequest: 20Gi
 
+  # 采集 Job（云原生）：集群内跑 diting-ingest 镜像，启用后不再依赖 REPO_I_ROOT
+  # 详见 docs/ingest-cloud-native.md；镜像来自项目 ACR，本地构建后 make push-images 推送，Chart 使用最新 tag
+  # 后半部分实践：enabled=true 时部署/升级会创建 Job 执行 make ingest-deploy（检查后全量/增量）
+  ingest:
+    enabled: true
+    image:
+      repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-ingest
+      tag: latest
+      pullPolicy: Always
+    # 私有 ACR 拉取凭证：部署前执行 kubectl apply -f charts/diting-stack/manifests/acr-pull-secret.yaml 或 make apply-acr-pull-secret
+    imagePullSecrets: ["acr-titan"]
+    # 密码与下面 databases 一致，或改为从 Secret 引用
+    timescaleUser: "postgres"
+    timescalePassword: "postgres"
+    postgresL2User: "postgres"
+    postgresL2Password: "postgres"
+
   # 数据库部署参数（供脚本调用 bitnami/postgresql、bitnami/redis 使用）
   databases:
     timescaledb:

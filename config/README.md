@@ -17,6 +17,12 @@
   - 密码请用环境变量注入：`export TF_VAR_instance_password='你的密码'`，再执行 `make deploy diting prod`。
   - `config/terraform-diting-prod.tfvars` 已加入 .gitignore，仅存在于本地。
 
+## ACR 拉取凭证（prod 采集镜像）
+
+- 归属 **charts/diting-stack**：**charts/diting-stack/manifests/acr-pull-secret.yaml** 为 K8s Secret，供本 Chart 的 ingest Job 从私有 ACR 拉取镜像。该文件含凭证，已加入 .gitignore。
+- 示例：**charts/diting-stack/manifests/acr-pull-secret.yaml.example**；若无正式文件可据此复制并填写后重命名为 `acr-pull-secret.yaml`。
+- 执行 **`make deploy diting prod`** 时，若存在该文件会先自动 apply，再部署 diting-stack；也可单独 **`make apply-acr-pull-secret`**（需 KUBECONFIG 指向 prod 集群）。部署类 manifest 仅放在 **charts/** 下，不放在 config/。
+
 ## 其他
 
 - `diting-prod.yaml` / `diting-dev.yaml`：部署控制（K3s、数据库等）。

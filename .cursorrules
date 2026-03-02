@@ -4,6 +4,18 @@
 
 ---
 
+## 目录边界 — 配置与部署分离，禁止错放
+
+- **config/**：**仅配置**。仅存放环境与部署**控制用**文件：如 `*.tfvars`、`diting-prod.yaml` / `diting-dev.yaml`（部署控制 YAML）、`deploy.yaml` 等。**禁止**在 config/ 下放置 K8s 部署用 manifest（如 Secret、Job、Deployment 的 YAML）、与某 Chart 绑定的附属资源文件；此类文件归属 **charts/** 下对应 Chart。
+- **charts/**：**Chart 及附属 manifest**。每个 Chart（如 `charts/diting-stack/`）包含：`Chart.yaml`、`values.yaml`、`templates/`（Helm 模板）；与该 Chart 配套、需单独 apply 的 K8s YAML（如 ACR 拉取凭证 Secret）放在该 Chart 的 **manifests/** 子目录（如 `charts/diting-stack/manifests/`）。**禁止**将部署用 manifest 放在 config/ 或仓库根下。
+- **scripts/**：脚本（如 prod-write-conn.sh）；不存放 K8s 资源定义。
+- **deploy-engine/**：子模块，仅读/更新引用，禁止在本仓内修改其内容（见下节）。
+- **docs/**：文档说明，不存放可执行部署或配置真相源。
+
+**违规示例**：在 config/ 下创建 `config/manifests/acr-pull-secret.yaml` 等部署文件属**违规**；正确位置为 `charts/diting-stack/manifests/acr-pull-secret.yaml`。AI 与人类在本仓新增 K8s manifest 或“部署文件”时，须放在对应 Chart 下（或 deploy-engine 约定路径），不得放在 config/。
+
+---
+
 ## deploy-engine 子模块 — 禁止在子模块拷贝内做任何“写”操作
 
 - **禁止**：在 **diting-infra 仓库内的 `deploy-engine/` 目录下进行任何会改变其 Git 状态或工作树的操作**，包括但不限于：编辑/添加/修改文件，`git add/commit/push`，**`git stash`**。deploy-engine 在本仓内为 **Git 子模块**，真相源为 **deploy-engine 独立仓库**；在子模块拷贝内 stash/commit 会污染该拷贝、影响后续 `make update-deploy-engine` 或 pull main，视为**违规**（见 diting-doc 00_系统规则 §九）。
