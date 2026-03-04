@@ -35,3 +35,14 @@
 - **版本与更新**：Chart 版本在 `Chart.yaml` 或 `Chart.lock` 中显式固定；升级时通过重新下载同路径覆盖或按项目约定流程执行，仍不得在 dependencies 下手改 Chart 内容。
 
 AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/dependencies/` 下 Chart 文件，应提示该限制并建议改用 values 覆盖或更新流程。
+
+---
+
+## Makefile/脚本修改 — 部署内容由配置控制
+
+- **原则**：**部署内容**（Service 类型、NodePort、端口、副本数等）由 **config/*.yaml 或 values 覆盖文件** 控制，**禁止在 Makefile 或脚本中写死**；Makefile/脚本仅 `-f config/xxx.yaml` 或从配置读取后传递。
+- **禁止**：为**单一组件**（如 Redis、某 DB）在 Makefile 中写专属逻辑：如根据条件生成临时 values、对某组件单独写死 `--set ...=端口/类型`。若某 Chart 的 values 需特殊格式（如某键须为 string），应在 **config/** 下维护该组件的 **values 覆盖文件**（如 `config/redis-values-prod.yaml`），Makefile 仅执行 `helm ... -f config/该文件`。
+- **修改前自检**：凡修改本仓 **Makefile 或部署相关脚本**、且涉及某组件的部署/暴露/端口/类型时，须先自检：该决策是否已在 **config/** 或 values 覆盖文件中？若否，**先**在 config 中新增或修改，再改 Makefile/脚本为「仅 -f 或从配置读值传递」。
+- **违规示例**：在 Makefile 中为 Redis 写「若 NodePort 则生成临时 YAML」或 `--set master.service.nodePorts.redis=30379` → 违规；正确做法：在 `config/redis-values-prod.yaml` 中写 `master.service.nodePorts.redis: "30379"`，Makefile 仅 `-f config/redis-values-prod.yaml`。
+
+完整约定见 diting-doc `00_系统规则_通用项目协议.md` §十一「部署内容由配置与 Chart 控制」。

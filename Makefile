@@ -87,7 +87,7 @@ PROD_DATA_ENV_ENV     = prod
 CONN_FILE             = $(CURDIR)/prod.conn
 DISK_ID_FILE          = $(CURDIR)/prod.disk_id
 
-.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret
+.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig apply-security-group-rules
 
 # 兼容旧命令（推荐使用 make deploy diting prod / make down diting prod）
 deploy-data-db-prod: deploy-diting-prod
@@ -139,6 +139,7 @@ deploy-diting-prod: update-deploy-engine
 		fi; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@$(MAKE) -f $(CURDIR)/Makefile apply-security-group-rules
 	@echo ""
 	@echo "=========================================="
 	@echo "  部署 Diting Stack（静态 PV/PVC）"
@@ -172,76 +173,81 @@ deploy-diting-prod: update-deploy-engine
 	helm repo update bitnami; \
 	if [ "$$(yq eval '.stack.databases.timescaledb.enabled // true' "$$CFG")" = "true" ]; then \
 		echo "部署 TimescaleDB..."; \
+		_SVC=$$(yq eval '.stack.databases.timescaledb.service.type // "ClusterIP"' "$$CFG"); \
+		_NP=$$(yq eval '.stack.databases.timescaledb.service.nodePort // ""' "$$CFG"); \
+		_EXTRA=""; [ "$$_SVC" = "NodePort" ] && [ -n "$$_NP" ] && _EXTRA="--set primary.service.type=NodePort --set primary.service.nodePorts.postgresql=$$_NP"; \
 		helm upgrade --install timescaledb bitnami/postgresql -n default \
 			--set auth.username=$$(yq eval '.stack.databases.timescaledb.auth.username // "postgres"' "$$CFG") \
 			--set auth.password=$$(yq eval '.stack.databases.timescaledb.auth.password // "postgres"' "$$CFG") \
 			--set auth.database=$$(yq eval '.stack.databases.timescaledb.auth.database // "postgres"' "$$CFG") \
 			--set primary.persistence.enabled=true \
 			--set primary.persistence.existingClaim=$$(yq eval '.stack.databases.timescaledb.persistence.existing_claim // "data-timescaledb-postgresql-0"' "$$CFG") \
+			$$_EXTRA \
 			--wait --timeout=5m; \
 		echo "✅ TimescaleDB 完成"; \
 	fi; \
 	if [ "$$(yq eval '.stack.databases.postgres_l2.enabled // true' "$$CFG")" = "true" ]; then \
 		echo "部署 PostgreSQL L2..."; \
+		_SVC=$$(yq eval '.stack.databases.postgres_l2.service.type // "ClusterIP"' "$$CFG"); \
+		_NP=$$(yq eval '.stack.databases.postgres_l2.service.nodePort // ""' "$$CFG"); \
+		_EXTRA=""; [ "$$_SVC" = "NodePort" ] && [ -n "$$_NP" ] && _EXTRA="--set primary.service.type=NodePort --set primary.service.nodePorts.postgresql=$$_NP"; \
 		helm upgrade --install postgresql-l2 bitnami/postgresql -n default \
 			--set auth.username=$$(yq eval '.stack.databases.postgres_l2.auth.username // "postgres"' "$$CFG") \
 			--set auth.password=$$(yq eval '.stack.databases.postgres_l2.auth.password // "postgres"' "$$CFG") \
 			--set auth.database=$$(yq eval '.stack.databases.postgres_l2.auth.database // "diting_l2"' "$$CFG") \
 			--set primary.persistence.enabled=true \
 			--set primary.persistence.existingClaim=$$(yq eval '.stack.databases.postgres_l2.persistence.existing_claim // "data-postgresql-l2-0"' "$$CFG") \
+			$$_EXTRA \
 			--wait --timeout=5m; \
 		echo "✅ PostgreSQL L2 完成"; \
 	fi; \
 	if [ "$$(yq eval '.stack.databases.redis.enabled // true' "$$CFG")" = "true" ]; then \
 		echo "部署 Redis..."; \
 		helm upgrade --install redis bitnami/redis -n default \
-			--set auth.enabled=$$(yq eval '.stack.databases.redis.auth_enabled // false' "$$CFG") \
-			--set master.persistence.enabled=true \
-			--set master.persistence.size=$$(yq eval '.stack.databases.redis.persistence.size // "10Gi"' "$$CFG") \
-			--set master.persistence.storageClass=$$(yq eval '.stack.databases.redis.persistence.storage_class // "local-path"' "$$CFG") \
-			--set volumePermissions.enabled=true \
+			-f "$(CONFIG_ROOT)/redis-values-prod.yaml" \
 			--wait --timeout=5m; \
 		echo "✅ Redis 完成"; \
 	fi
 	@$(MAKE) -f $(CURDIR)/Makefile prod-write-conn
 	@echo ""
 	@echo "=========================================="
-	@echo "  执行数据采集（后半部分）"
+	@echo "  数据采集（K3s Job / 本机可选）"
 	@echo "=========================================="
-	@INGEST_ENABLED=$$(yq eval '.data_ingestion.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-	if [ "$$INGEST_ENABLED" = "true" ]; then \
-		INGEST_TARGET=$$(yq eval '.data_ingestion.target // "ingest-test"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-		CORE_REPO=$$(yq eval '.data_ingestion.core_repo_path // ""' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-		if [ -z "$$CORE_REPO" ]; then \
-			CORE_REPO="$${REPO_I_ROOT:-}"; \
-		fi; \
-		if [ -n "$$CORE_REPO" ] && [ -d "$$CORE_REPO" ]; then \
-			echo "执行数据采集: $$INGEST_TARGET (工作目录: $$CORE_REPO)"; \
-			cp "$(CONN_FILE)" "$$CORE_REPO/.env" && \
-			$(MAKE) -C "$$CORE_REPO" "$$INGEST_TARGET" && \
-			echo "✅ 数据采集完成"; \
-		else \
-			echo "⚠️  REPO_I_ROOT 未设置或目录不存在，跳过数据采集"; \
-			echo "   设置方法: export REPO_I_ROOT=/path/to/diting-core"; \
-		fi; \
+	@STACK_INGEST=$$(yq eval '.stack.ingest.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+	if [ "$$STACK_INGEST" = "true" ]; then \
+		echo "✅ 数据采集已由 diting-stack 的 K3s Job 在部署时触发（stack.ingest.enabled=true），无需本机 REPO_I_ROOT"; \
 	else \
-		echo "数据采集已禁用（data_ingestion.enabled=false），跳过"; \
+		INGEST_ENABLED=$$(yq eval '.data_ingestion.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		if [ "$$INGEST_ENABLED" = "true" ]; then \
+			INGEST_TARGET=$$(yq eval '.data_ingestion.target // "ingest-test"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+			CORE_REPO=$$(yq eval '.data_ingestion.core_repo_path // ""' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+			if [ -z "$$CORE_REPO" ]; then CORE_REPO="$${REPO_I_ROOT:-}"; fi; \
+			if [ -n "$$CORE_REPO" ] && [ -d "$$CORE_REPO" ]; then \
+				echo "执行数据采集: $$INGEST_TARGET (工作目录: $$CORE_REPO)"; \
+				cp "$(CONN_FILE)" "$$CORE_REPO/.env" && $(MAKE) -C "$$CORE_REPO" "$$INGEST_TARGET" && echo "✅ 数据采集完成"; \
+			else \
+				echo "⚠️  REPO_I_ROOT 未设置或目录不存在，跳过本机数据采集"; \
+				echo "   设置方法: export REPO_I_ROOT=/path/to/diting-core"; \
+			fi; \
+		else \
+			echo "数据采集已禁用（data_ingestion.enabled=false），跳过"; \
+		fi; \
 	fi
 	@echo ""
 	@echo "=========================================="
 	@echo "  ✅ 部署完成！"
 	@echo "=========================================="
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	if [ -f "$$KUBECONFIG" ] && kubectl cluster-info --request-timeout=5s &>/dev/null; then \
+		echo ""; echo "kubectl get nodes:"; kubectl get nodes 2>/dev/null || true; \
+		echo ""; echo "kubectl get pods -A:"; kubectl get pods -A 2>/dev/null || true; \
+	fi
 	@echo ""
-	@echo "⚠️  当前终端需要先设置 KUBECONFIG 环境变量："
+	@echo "当前终端立即生效 KUBECONFIG（复制执行）："
+	@echo "    eval \$$(make -C $(CURDIR) print-kubeconfig)"
 	@echo ""
-	@echo "    export KUBECONFIG=\"$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)\""
-	@echo ""
-	@echo "然后可以执行："
-	@echo ""
-	@echo "    kubectl get nodes"
-	@echo "    kubectl get pods -A"
-	@echo ""
-	@echo "（新终端会自动生效，因为已写入 shell 配置文件）"
+	@echo "或手动： export KUBECONFIG=\"$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)\""
+	@echo "（新终端会自动生效，因 get-kubeconfig 已写入 shell 配置文件）"
 	@echo "=========================================="
 	@echo ""
 
@@ -249,6 +255,14 @@ deploy-diting-prod: update-deploy-engine
 prod-write-conn:
 	@scripts/prod-write-conn.sh "$(CONFIG_ROOT)" "$(DEPLOY_ENGINE_DIR)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 	@echo "连接信息已写入 $(CONN_FILE)（若脚本未实现则需人工填写 EIP 与 NodePort）"
+
+# 按 config/security-group-rules.yaml 为 prod 安全组添加入站规则（NodePort 等）；部署时自动调用，也可单独执行
+apply-security-group-rules:
+	@scripts/apply-security-group-rules.sh "$(CURDIR)" || true
+
+# 输出 export KUBECONFIG=... 供当前终端生效：eval $(make -C diting-infra print-kubeconfig)
+print-kubeconfig:
+	@echo "export KUBECONFIG=\"$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)\""
 
 # 将 ACR 拉取凭证 Secret 应用到当前 KUBECONFIG 指向的集群（default 命名空间）
 # 需存在 charts/diting-stack/manifests/acr-pull-secret.yaml；make deploy diting prod 时若存在该文件会自动 apply
@@ -268,7 +282,8 @@ deploy-diting-prod-with-ingest: deploy-diting-prod
 		echo "跳过 ingest-test（设置 REPO_I_ROOT 指向 diting-core 可自动执行）"; \
 	fi
 
-# Down 仅回收 ECS/K3s/EIP，保留独立数据盘（-target=module.ecs）；prod.disk_id 保留供再次 Up 挂载同盘
+# Down 仅释放 ECS 与 EIP（-target=module.ecs），其它资源（VPC、数据盘、NAS、OSS 等）均在 tfvars 中固定且不释放；prod.disk_id 保留供再次 Up 挂载同盘。
+# 约定：ECS 和 EIP 资源必须释放；固定资源见 config/terraform-diting-prod.tfvars 内注释。
 # FULL_DESTROY=1 时：若 Terraform state 中 NAS 访问组为 dev 共享（diting_nas_group_dev）或 tfvars 中非注释行 nas_use_existing_access_group = true，先从 Terraform state 移除该资源，避免误删导致 InvalidAccessGroup.AlreadyAttached
 # 注意：deploy-engine 的 -state= 指向的是编排用 JSON，Terraform 实际使用 deploy/terraform/alicloud/terraform.tfstate（backend local）
 # make down diting prod 的实际执行 target
@@ -320,4 +335,4 @@ down-diting-prod:
 		fi; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
-	@echo "make down diting prod OK（ECS/EIP 已回收；数据盘已保留，再次执行 make deploy diting prod 将挂载同盘）"
+	@echo "make down diting prod OK（ECS/EIP 已释放；固定资源 VPC/数据盘/NAS/OSS 已保留，再次执行 make deploy diting prod 将挂载同盘）"

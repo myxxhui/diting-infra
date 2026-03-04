@@ -38,7 +38,16 @@ else
   [ -f "$DISK_ID_FILE" ] && echo "[OK] 保留已有 $DISK_ID_FILE 供再次 Up 挂载同盘" || true
 fi
 
-# NodePort 默认值（TimescaleDB/L2 常用 30001/30002；需与 Helm values 一致）
+# NodePort 从配置文件读取：L1/L2 来自 diting-prod.yaml；Redis 来自 config/redis-values-prod.yaml（覆盖 Chart）
+CONFIG_FILE="${CONFIG_ROOT}/${PROJECT}-${ENV}.yaml"
+REDIS_VALUES="${CONFIG_ROOT}/redis-values-prod.yaml"
+if [ -f "$CONFIG_FILE" ] && command -v yq &>/dev/null; then
+  NODEPORT_L1="${NODEPORT_L1:-$(yq eval '.stack.databases.timescaledb.service.nodePort // 30001' "$CONFIG_FILE" 2>/dev/null)}"
+  NODEPORT_L2="${NODEPORT_L2:-$(yq eval '.stack.databases.postgres_l2.service.nodePort // 30002' "$CONFIG_FILE" 2>/dev/null)}"
+fi
+if [ -f "$REDIS_VALUES" ] && command -v yq &>/dev/null; then
+  NODEPORT_REDIS="${NODEPORT_REDIS:-$(yq eval '.master.service.nodePorts.redis // "30379"' "$REDIS_VALUES" 2>/dev/null)}"
+fi
 NODEPORT_L1="${NODEPORT_L1:-30001}"
 NODEPORT_L2="${NODEPORT_L2:-30002}"
 NODEPORT_REDIS="${NODEPORT_REDIS:-30379}"

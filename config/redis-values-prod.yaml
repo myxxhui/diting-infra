@@ -1,0 +1,23 @@
+# ==============================================================================
+# Redis Chart 部署覆盖（prod）
+# ==============================================================================
+# 通过本文件覆盖 Bitnami Redis Chart 的 values，控制服务暴露方式等；Makefile 仅使用
+# -f config/redis-values-prod.yaml 部署，不在此写死任何值。修改暴露方式/端口时只改本文件。
+# Bitnami Chart 要求 master.service.nodePorts.redis 为 string 类型。
+# ==============================================================================
+
+auth:
+  enabled: false
+
+master:
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: local-path
+  service:
+    type: NodePort
+    nodePorts:
+      redis: "30379"
+
+volumePermissions:
+  enabled: true
