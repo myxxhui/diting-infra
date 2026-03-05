@@ -1,17 +1,16 @@
 {{- if .Values.ingest.enabled }}
+# 不作为 Hook，避免 Job 失败（如 BackoffLimitExceeded）导致整次 helm upgrade 失败；每次升级用新 revision 创建新 Job 便于排查
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: diting-ingest
+  name: diting-ingest-{{ .Release.Revision }}
   namespace: default
   labels:
     app: diting
     component: ingest
   annotations:
-    # 与 storage-init 错开：init 用 -5，采集用 5，确保 DB 就绪后再跑
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation
+    # 非 Hook：Helm 不等待 Job 完成，部署可成功；Job 失败时用 kubectl logs job/diting-ingest-<revision> -n default 排查
+    "helm.sh/resource-policy": keep
 spec:
   ttlSecondsAfterFinished: {{ .Values.ingest.ttlSecondsAfterFinished }}
   backoffLimit: {{ .Values.ingest.backoffLimit }}
@@ -22,9 +21,27 @@ spec:
         component: ingest
     spec:
       {{- with .Values.ingest.imagePullSecrets }}
-      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      imagePullSecrets:
+      {{- range . }}
+      - name: {{ if kindIs "string" . }}{{ . | quote }}{{ else }}{{ .name | default "" | quote }}{{ end }}
+      {{- end }}
       {{- end }}
       restartPolicy: OnFailure
+      # 云原生：init 容器在 DB/Redis 就绪前阻塞，Job 可与 stack 同次部署，无需两阶段
+      initContainers:
+      - name: wait-for-deps
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "等待 TimescaleDB..."
+          until nc -z {{ .Values.ingest.timescaleHost }} {{ .Values.ingest.timescalePort }}; do sleep 2; done
+          echo "等待 PostgreSQL L2..."
+          until nc -z {{ .Values.ingest.postgresL2Host }} {{ .Values.ingest.postgresL2Port }}; do sleep 2; done
+          echo "等待 Redis..."
+          until nc -z {{ .Values.ingest.redisHost }} {{ .Values.ingest.redisPort }}; do sleep 2; done
+          echo "依赖就绪，启动采集"
       containers:
       - name: ingest
         image: "{{ .Values.ingest.image.repository }}:{{ .Values.ingest.image.tag }}"
@@ -37,7 +54,9 @@ spec:
         env:
         - name: INGEST_DEPLOY_FULL_DAYS_THRESHOLD
           value: {{ .Values.ingest.fullDaysThreshold | quote }}
-        resources: {{- toYaml .Values.ingest.resources | nindent 8 }}
+        {{- with .Values.ingest.resources }}
+        resources: {{- toYaml . | nindent 10 }}
+        {{- end }}
       {{- with .Values.ingest.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

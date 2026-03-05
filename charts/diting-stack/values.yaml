@@ -11,10 +11,10 @@ ingest:
     pullPolicy: IfNotPresent
   # 私有 ACR 拉取凭证（如阿里云个人版）；创建：kubectl create secret docker-registry acr-titan --docker-server=crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com --docker-username=sean_hui --docker-password=<密码>
   imagePullSecrets: []
-  # 集群内 Service DNS（Bitnami PostgreSQL/Redis 默认服务名）
-  timescaleHost: "timescaledb-primary.default.svc.cluster.local"
+  # 集群内 Service DNS（与 Bitnami postgresql/redis Chart 实际创建的服务名一致，用于 init 容器 nc 检查与 Secret DSN）
+  timescaleHost: "timescaledb-postgresql.default.svc.cluster.local"
   timescalePort: "5432"
-  postgresL2Host: "postgresql-l2-primary.default.svc.cluster.local"
+  postgresL2Host: "postgresql-l2.default.svc.cluster.local"
   postgresL2Port: "5432"
   redisHost: "redis-master.default.svc.cluster.local"
   redisPort: "6379"
@@ -27,9 +27,9 @@ ingest:
   postgresL2Database: "diting_l2"
   # 部署时检查：超过此天数未更新则全量，否则增量；见 run_ingest_deploy.py
   fullDaysThreshold: 7
-  # 一次性 Job：backoffLimit
+  # 一次性 Job：backoffLimit；失败后保留时间（便于 kubectl logs 排查，默认 24h）
   backoffLimit: 3
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 86400
   resources:
     requests:
       memory: "256Mi"

@@ -87,7 +87,7 @@ PROD_DATA_ENV_ENV     = prod
 CONN_FILE             = $(CURDIR)/prod.conn
 DISK_ID_FILE          = $(CURDIR)/prod.disk_id
 
-.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig apply-security-group-rules
+.PHONY: deploy-diting-prod down-diting-prod fix-diting-prod-stale-eip deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig apply-security-group-rules
 
 # 兼容旧命令（推荐使用 make deploy diting prod / make down diting prod）
 deploy-data-db-prod: deploy-diting-prod
@@ -142,7 +142,7 @@ deploy-diting-prod: update-deploy-engine
 	@$(MAKE) -f $(CURDIR)/Makefile apply-security-group-rules
 	@echo ""
 	@echo "=========================================="
-	@echo "  部署 Diting Stack（静态 PV/PVC）"
+	@echo "  部署 Diting Stack（静态 PV/PVC + 采集 Job，Job 内 init 等待 DB 就绪）"
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	ACR_SECRET="$(CURDIR)/charts/diting-stack/manifests/acr-pull-secret.yaml"; \
@@ -161,7 +161,7 @@ deploy-diting-prod: update-deploy-engine
 			helm install diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
 		fi; \
 		rm -f "$$TMP"; \
-		echo "✅ Diting Stack（存储）部署完成"; \
+		echo "✅ Diting Stack 部署完成（ingest Job 由 init 容器等待 DB 就绪后执行）"; \
 	fi
 	@echo ""
 	@echo "=========================================="
@@ -281,6 +281,13 @@ deploy-diting-prod-with-ingest: deploy-diting-prod
 	else \
 		echo "跳过 ingest-test（设置 REPO_I_ROOT 指向 diting-core 可自动执行）"; \
 	fi
+
+# 若 deploy 报错 InvalidAllocationId.NotFound（EIP 在云上已释放但 state 仍记录），先执行本 target 再从 state 移除 EIP 与关联，再 make deploy diting prod 会新建 EIP 并关联。
+fix-diting-prod-stale-eip:
+	@_TF="$(CURDIR)/$(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud"; \
+	(cd "$$_TF" && terraform state rm 'module.ecs.alicloud_eip_association.spot[0]' 2>/dev/null) || true; \
+	(cd "$$_TF" && terraform state rm 'module.ecs.alicloud_eip_address.spot[0]' 2>/dev/null) || true; \
+	echo "[OK] 已从 state 移除 EIP 与 EIP 关联；请执行: make deploy diting prod"
 
 # Down 仅释放 ECS 与 EIP（-target=module.ecs），其它资源（VPC、数据盘、NAS、OSS 等）均在 tfvars 中固定且不释放；prod.disk_id 保留供再次 Up 挂载同盘。
 # 约定：ECS 和 EIP 资源必须释放；固定资源见 config/terraform-diting-prod.tfvars 内注释。
