@@ -87,7 +87,7 @@ PROD_DATA_ENV_ENV     = prod
 CONN_FILE             = $(CURDIR)/prod.conn
 DISK_ID_FILE          = $(CURDIR)/prod.disk_id
 
-.PHONY: deploy-diting-prod down-diting-prod fix-diting-prod-stale-eip deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig apply-security-group-rules
+.PHONY: deploy-diting-prod down-diting-prod fix-diting-prod-stale-eip deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig
 
 # 兼容旧命令（推荐使用 make deploy diting prod / make down diting prod）
 deploy-data-db-prod: deploy-diting-prod
@@ -138,8 +138,7 @@ deploy-diting-prod: update-deploy-engine
 			echo "[prod-up] 数据盘已创建: $$_DISK_ID"; \
 		fi; \
 	fi
-	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
-	@$(MAKE) -f $(CURDIR)/Makefile apply-security-group-rules
+	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@echo ""
 	@echo "=========================================="
 	@echo "  部署 Diting Stack（静态 PV/PVC + 采集 Job，Job 内 init 等待 DB 就绪）"
@@ -256,10 +255,6 @@ prod-write-conn:
 	@scripts/prod-write-conn.sh "$(CONFIG_ROOT)" "$(DEPLOY_ENGINE_DIR)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 	@echo "连接信息已写入 $(CONN_FILE)（若脚本未实现则需人工填写 EIP 与 NodePort）"
 
-# 按 config/security-group-rules.yaml 为 prod 安全组添加入站规则（NodePort 等）；部署时自动调用，也可单独执行
-apply-security-group-rules:
-	@scripts/apply-security-group-rules.sh "$(CURDIR)" || true
-
 # 输出 export KUBECONFIG=... 供当前终端生效：eval $(make -C diting-infra print-kubeconfig)
 print-kubeconfig:
 	@echo "export KUBECONFIG=\"$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)\""
@@ -282,12 +277,21 @@ deploy-diting-prod-with-ingest: deploy-diting-prod
 		echo "跳过 ingest-test（设置 REPO_I_ROOT 指向 diting-core 可自动执行）"; \
 	fi
 
-# 若 deploy 报错 InvalidAllocationId.NotFound（EIP 在云上已释放但 state 仍记录），先执行本 target 再从 state 移除 EIP 与关联，再 make deploy diting prod 会新建 EIP 并关联。
-fix-diting-prod-stale-eip:
+# 控制台已释放 ECS/EIP 但 Terraform state 仍认为存在时，从 state 移除 ECS + EIP + 盘挂载 + 安全组规则残留，下次 make deploy 会重新创建。
+# 适用：手动在控制台释放了实例、或 apply 报 RuleNotExist/DependencyViolation。enable_spot=true 时用 spot[0]，否则需改 on_demand[0]。
+fix-diting-prod-stale-ecs:
 	@_TF="$(CURDIR)/$(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud"; \
+	echo "[fix] 从 state 移除 ECS + EIP + 盘挂载 + 安全组规则残留（控制台已释放或规则已删时使用）..."; \
 	(cd "$$_TF" && terraform state rm 'module.ecs.alicloud_eip_association.spot[0]' 2>/dev/null) || true; \
 	(cd "$$_TF" && terraform state rm 'module.ecs.alicloud_eip_address.spot[0]' 2>/dev/null) || true; \
-	echo "[OK] 已从 state 移除 EIP 与 EIP 关联；请执行: make deploy diting prod"
+	(cd "$$_TF" && terraform state rm 'module.ecs.alicloud_instance.spot[0]' 2>/dev/null) || true; \
+	(cd "$$_TF" && terraform state rm 'module.ecs.alicloud_disk_attachment.spot[0]' 2>/dev/null) || true; \
+	(cd "$$_TF" && terraform state rm 'module.security.alicloud_security_group_rule.ssh[0]' 2>/dev/null) || true; \
+	(cd "$$_TF" && terraform state rm 'module.security.alicloud_security_group_rule.k8s_api[0]' 2>/dev/null) || true; \
+	echo "[OK] 已从 state 移除；请执行: make deploy diting prod"
+
+# 兼容旧命令（仅移除 EIP，不包含 ECS）
+fix-diting-prod-stale-eip: fix-diting-prod-stale-ecs
 
 # Down 仅释放 ECS 与 EIP（-target=module.ecs），其它资源（VPC、数据盘、NAS、OSS 等）均在 tfvars 中固定且不释放；prod.disk_id 保留供再次 Up 挂载同盘。
 # 约定：ECS 和 EIP 资源必须释放；固定资源见 config/terraform-diting-prod.tfvars 内注释。

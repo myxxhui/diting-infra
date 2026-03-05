@@ -34,10 +34,6 @@
 - 示例：**charts/diting-stack/manifests/acr-pull-secret.yaml.example**；若无正式文件可据此复制并填写后重命名为 `acr-pull-secret.yaml`。
 - 执行 **`make deploy diting prod`** 时，若存在该文件会先自动 apply，再部署 diting-stack；也可单独 **`make apply-acr-pull-secret`**（需 KUBECONFIG 指向 prod 集群）。部署类 manifest 仅放在 **charts/** 下，不放在 config/。
 
-## 安全组规则（prod 部署后本机访问 NodePort）
-
-- **config/security-group-rules.yaml**：需放通的入站端口（TimescaleDB/L2/Redis 的 NodePort 等）。`make deploy diting prod` 会在 Terraform 创建 ECS 后自动执行 `make apply-security-group-rules` 按此配置放通；也可单独执行 `make apply-security-group-rules`。详见 **docs/安全组规则说明.md**。
-
 ## Redis 部署覆盖（prod）
 
 - **redis-values-prod.yaml**：Bitnami Redis Chart 的 values 覆盖文件；**服务暴露方式（NodePort/端口）由此文件控制**，Makefile 仅执行 `helm ... -f config/redis-values-prod.yaml`。修改 Redis 暴露或端口时只改本文件，符合「部署内容由配置与 Chart 控制」的系统规则。

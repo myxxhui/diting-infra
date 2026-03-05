@@ -12,6 +12,9 @@ spot_price_limit  = 0.5
 eip_bandwidth     = 100
 disk_category     = "cloud_essd"
 
+# 安全组 SSH/6443：不通过本仓脚本/配置管理，由控制台或已有规则控制；Terraform 若需写规则则用 0.0.0.0/0 避免单 IP 限制
+ssh_allowed_cidr = "0.0.0.0/0"
+
 # 固定资源 ID（复用已有时填）
 vpc_existing_id                = "vpc-j6cuhmska9vfwqa6my16q"
 vswitch_existing_id            = "vsw-j6ct3ymab1lxeqz38lbwi"
