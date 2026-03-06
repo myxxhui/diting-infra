@@ -10,4 +10,6 @@ echo "Running 01_l1_ohlcv.sql on TimescaleDB..."
 psql "$TIMESCALE_DSN" -v ON_ERROR_STOP=1 -f /sql/01_l1_ohlcv.sql
 echo "Running 02_l2_data_versions.sql on L2 PostgreSQL..."
 psql "$PG_L2_DSN" -v ON_ERROR_STOP=1 -f /sql/02_l2_data_versions.sql
+echo "Running 03_l2_industry_revenue_summary.sql on L2 PostgreSQL..."
+psql "$PG_L2_DSN" -v ON_ERROR_STOP=1 -f /sql/03_l2_industry_revenue_summary.sql
 echo "Schema init done."

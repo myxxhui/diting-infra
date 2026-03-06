@@ -46,3 +46,11 @@ AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/de
 - **违规示例**：在 Makefile 中为 Redis 写「若 NodePort 则生成临时 YAML」或 `--set master.service.nodePorts.redis=30379` → 违规；正确做法：在 `config/redis-values-prod.yaml` 中写 `master.service.nodePorts.redis: "30379"`，Makefile 仅 `-f config/redis-values-prod.yaml`。
 
 完整约定见 diting-doc `00_系统规则_通用项目协议.md` §十一「部署内容由配置与 Chart 控制」。
+
+---
+
+## 部署与编排文件归属（与协议 §十一 一致）
+
+- **本仓（diting-infra）为部署/编排的归属仓**：Docker Compose、本地验证用编排文件（如 `compose/docker-compose.ingest.yaml`、`compose/docker-compose.module-a.yaml`）须放在**本仓**，禁止放在 diting-core。
+- **新增 compose 或本地验证编排时**：在 **compose/** 下新增或修改，并在 04_ 实践文档中写明工作目录为 **diting-infra**、路径为 `compose/xxx.yaml`。
+- **diting-core** 仅保留：业务代码、构建镜像用 Dockerfile、单测与 `make build-*`；若发现 compose 或「连远程库验证」类编排在 core，须迁至本仓 `compose/` 并更新文档。

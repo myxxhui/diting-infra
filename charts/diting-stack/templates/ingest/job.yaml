@@ -54,6 +54,26 @@ spec:
         env:
         - name: INGEST_DEPLOY_FULL_DAYS_THRESHOLD
           value: {{ .Values.ingest.fullDaysThreshold | quote }}
+        - name: INGEST_PRODUCTION_UNIVERSE
+          value: {{ .Values.ingest.productionUniverse | default true | quote }}
+        - name: INGEST_PRODUCTION_OHLCV
+          value: {{ .Values.ingest.productionOhlcv | default true | quote }}
+        - name: INGEST_PRODUCTION_INDUSTRY_REVENUE
+          value: {{ .Values.ingest.productionIndustryRevenue | default true | quote }}
+        - name: INGEST_PRODUCTION_NEWS
+          value: {{ .Values.ingest.productionNews | default true | quote }}
+        {{- if .Values.ingest.ingestSource }}
+        - name: INGEST_SOURCE
+          value: {{ .Values.ingest.ingestSource | quote }}
+        {{- end }}
+        {{- if .Values.ingest.jqdataDateStart }}
+        - name: INGEST_JQDATA_DATE_START
+          value: {{ .Values.ingest.jqdataDateStart | quote }}
+        {{- end }}
+        {{- if .Values.ingest.jqdataDateEnd }}
+        - name: INGEST_JQDATA_DATE_END
+          value: {{ .Values.ingest.jqdataDateEnd | quote }}
+        {{- end }}
         {{- with .Values.ingest.resources }}
         resources: {{- toYaml . | nindent 10 }}
         {{- end }}

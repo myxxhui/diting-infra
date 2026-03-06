@@ -4,7 +4,7 @@
 # 采集模块（Job）：集群内运行 diting-ingest 镜像，连接信息由 Secret 注入
 ingest:
   enabled: false
-  # 生产环境（config/diting-prod.yaml）覆盖为项目 ACR + tag latest，本地构建后 make push-images 推送
+  # 生产环境（config/diting-prod.yaml）覆盖为项目 ACR + tag latest；diting-core 执行 make build-images 构建，make push-images 推送（需 DITING_ACR_PASSWORD）
   image:
     repository: diting-ingest
     tag: test
@@ -27,6 +27,18 @@ ingest:
   postgresL2Database: "diting_l2"
   # 部署时检查：超过此天数未更新则全量，否则增量；见 run_ingest_deploy.py
   fullDaysThreshold: 7
+  # 全量采集时各 Step 开关（Pod 内无 .env，必须由此或 Secret 注入；未设则 run_ingest_production 会跳过所有步骤）
+  productionUniverse: true
+  productionOhlcv: true
+  productionIndustryRevenue: true
+  productionNews: true
+  # 数据源与时间范围（与 .env 中本地采集用变量一致；Pod 内无 .env，需由此或 Secret 注入才能正常拉数）
+  # ingestSource: akshare | jqdata，空则默认 akshare；用 jqdata 时须同时配置 jqdataUser、jqdataPassword（或写入 Secret）
+  ingestSource: ""
+  jqdataDateStart: ""   # 可选，统一拉取区间起点，如 2025-01-01
+  jqdataDateEnd: ""    # 可选，统一拉取区间终点，如 2025-08-01
+  jqdataUser: ""       # 可选；敏感信息也可通过 kubectl 对 diting-ingest-conn 追加
+  jqdataPassword: ""   # 可选；敏感信息建议通过 Secret 单独注入
   # 一次性 Job：backoffLimit；失败后保留时间（便于 kubectl logs 排查，默认 24h）
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400
@@ -66,3 +78,32 @@ storage:
       namespace: default
       accessMode: ReadWriteOnce
       storageRequest: 20Gi
+
+# Module A 语义分类器（独立部署单元）：连接 L1/L2 由 Secret 注入，与 ingest 同源
+module_a:
+  enabled: false
+  image:
+    repository: diting-module-a
+    tag: test
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  timescaleHost: "timescaledb-postgresql.default.svc.cluster.local"
+  timescalePort: "5432"
+  postgresL2Host: "postgresql-l2.default.svc.cluster.local"
+  postgresL2Port: "5432"
+  timescaleUser: "postgres"
+  timescalePassword: "postgres"
+  timescaleDatabase: "postgres"
+  postgresL2User: "postgres"
+  postgresL2Password: "postgres"
+  postgresL2Database: "diting_l2"
+  # 长期运行：RUN_LOOP=1 时每 24h 执行一次全量分类
+  runLoop: false
+  runLoopIntervalSec: 86400
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

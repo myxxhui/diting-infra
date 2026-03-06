@@ -69,6 +69,28 @@ stack:
     timescalePassword: "postgres"
     postgresL2User: "postgres"
     postgresL2Password: "postgres"
+    # 数据源与 JQData：与本地 .env 一致，Pod 内无 .env 需由此注入才能采数
+    ingestSource: jqdata
+    jqdataDateStart: "2025-01-01"
+    jqdataDateEnd: "2025-08-01"
+    jqdataUser: "13031539952"
+    jqdataPassword: "Hui123123"
+
+  # Module A 语义分类器（独立部署）：连接 L1/L2 与 ingest 同源，由 Secret 注入
+  # 生产启用时需先构建并推送镜像（diting-core: make build-module-a / push-module-a），并配置 imagePullSecrets
+  module_a:
+    enabled: true
+    image:
+      repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-module-a
+      tag: latest
+      pullPolicy: Always
+    imagePullSecrets: ["acr-titan"]
+    timescaleUser: "postgres"
+    timescalePassword: "postgres"
+    postgresL2User: "postgres"
+    postgresL2Password: "postgres"
+    runLoop: true
+    runLoopIntervalSec: 86400
 
   # 数据库部署参数（供脚本调用 bitnami/postgresql、bitnami/redis 使用）
   # 服务暴露方式由此处与 Chart 控制，Makefile 仅从本配置读取并传递 helm，不写死（见系统规则「部署内容由配置与 Chart 控制」）

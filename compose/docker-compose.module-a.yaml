@@ -1,0 +1,14 @@
+# Stage3-01 Module A 本地验证：连接远程数据库（prod.conn）测试分类功能 [Ref: 01_语义分类器_实践]
+# 归属 diting-infra：部署/编排相关文件在部署仓（见 00_系统规则 §十一 部署与编排文件归属）
+# 使用前：在 diting-core 执行 make build-module-a；在 diting-infra 根目录执行：
+#   docker compose -f compose/docker-compose.module-a.yaml up
+# 用于在部署到 K3s 之前，本地用 Docker 跑通 Module A 并连接远程 L1/L2 验证功能
+
+services:
+  module-a:
+    image: diting-module-a:test
+    env_file:
+      - ../prod.conn
+    environment:
+      RUN_LOOP: "0"
+    # prod.conn 在 diting-infra 根目录；部署后由 make deploy diting prod 产出

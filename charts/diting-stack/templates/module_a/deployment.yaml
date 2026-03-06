@@ -1,0 +1,60 @@
+{{- if .Values.module_a.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diting-module-a
+  namespace: default
+  labels:
+    app: diting
+    component: module-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: diting
+      component: module-a
+  template:
+    metadata:
+      labels:
+        app: diting
+        component: module-a
+    spec:
+      {{- with .Values.module_a.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range . }}
+      - name: {{ if kindIs "string" . }}{{ . | quote }}{{ else }}{{ .name | default "" | quote }}{{ end }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+      - name: wait-for-deps
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "等待 TimescaleDB..."
+          until nc -z {{ .Values.module_a.timescaleHost }} {{ .Values.module_a.timescalePort }}; do sleep 2; done
+          echo "等待 PostgreSQL L2..."
+          until nc -z {{ .Values.module_a.postgresL2Host }} {{ .Values.module_a.postgresL2Port }}; do sleep 2; done
+          echo "Module A 依赖就绪"
+      containers:
+      - name: module-a
+        image: "{{ .Values.module_a.image.repository }}:{{ .Values.module_a.image.tag }}"
+        imagePullPolicy: {{ .Values.module_a.image.pullPolicy }}
+        envFrom:
+        - secretRef:
+            name: diting-module-a-conn
+        env:
+        - name: RUN_LOOP
+          value: {{ if .Values.module_a.runLoop }}"1"{{ else }}"0"{{ end }}
+        - name: RUN_LOOP_INTERVAL_SEC
+          value: {{ .Values.module_a.runLoopIntervalSec | quote }}
+        - name: DITING_CORE_ROOT
+          value: "/app"
+        {{- with .Values.module_a.resources }}
+        resources: {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- with .Values.module_a.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

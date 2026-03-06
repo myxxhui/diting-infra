@@ -153,14 +153,14 @@ deploy-diting-prod: update-deploy-engine
 	STACK_ENABLED=$$(yq eval '.stack.enabled // true' "$$CFG"); \
 	if [ "$$STACK_ENABLED" = "true" ]; then \
 		TMP=$$(mktemp); \
-		yq eval '{"storage": .stack.storage, "ingest": (.stack.ingest // {})}' "$$CFG" > "$$TMP"; \
+		yq eval '{"storage": .stack.storage, "ingest": (.stack.ingest // {}), "module_a": (.stack.module_a // {})}' "$$CFG" > "$$TMP"; \
 		if helm list -n default | grep -q diting-stack; then \
 			helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
 		else \
 			helm install diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
 		fi; \
 		rm -f "$$TMP"; \
-		echo "✅ Diting Stack 部署完成（ingest Job 由 init 容器等待 DB 就绪后执行）"; \
+		echo "✅ Diting Stack 部署完成（ingest Job、module_a Deployment 由 init 等待 DB 就绪后启动）"; \
 	fi
 	@echo ""
 	@echo "=========================================="
