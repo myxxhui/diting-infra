@@ -21,7 +21,11 @@ vswitch_existing_id            = "vsw-j6ct3ymab1lxeqz38lbwi"
 security_group_existing_id     = "sg-j6cizfabvego0nem81c2"
 nas_existing_file_system_id    = "12db2e48f90"
 nas_existing_access_group_name = "deploy-engine_nas_group_prod"
-use_existing_data_disk_id      = "d-j6cc6ew2bqkfdlwaavit"
+# 复用已有挂载点（避免每文件系统 2 个上限）：从控制台 NAS→文件系统→挂载点 复制域名填入
+nas_use_existing_mount_target = true
+
+nas_existing_mount_target_domain = "12db2e48f90-hpy48.cn-hongkong.nas.aliyuncs.com"
+use_existing_data_disk_id        = "d-j6cc6ew2bqkfdlwaavit"
 
 enable_prod_data_disk = true
 data_disk_size        = 100

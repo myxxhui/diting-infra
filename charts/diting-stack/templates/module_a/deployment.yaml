@@ -2,22 +2,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: diting-module-a
+  name: diting-semantic-classifier-a
   namespace: default
   labels:
     app: diting
-    component: module-a
+    component: semantic-classifier-a
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: diting
-      component: module-a
+      component: semantic-classifier-a
   template:
     metadata:
       labels:
         app: diting
-        component: module-a
+        component: semantic-classifier-a
     spec:
       {{- with .Values.module_a.imagePullSecrets }}
       imagePullSecrets:
@@ -36,14 +36,14 @@ spec:
           until nc -z {{ .Values.module_a.timescaleHost }} {{ .Values.module_a.timescalePort }}; do sleep 2; done
           echo "等待 PostgreSQL L2..."
           until nc -z {{ .Values.module_a.postgresL2Host }} {{ .Values.module_a.postgresL2Port }}; do sleep 2; done
-          echo "Module A 依赖就绪"
+          echo "语义分类器-A 依赖就绪"
       containers:
-      - name: module-a
+      - name: semantic-classifier-a
         image: "{{ .Values.module_a.image.repository }}:{{ .Values.module_a.image.tag }}"
         imagePullPolicy: {{ .Values.module_a.image.pullPolicy }}
         envFrom:
         - secretRef:
-            name: diting-module-a-conn
+            name: diting-semantic-classifier-a-conn
         env:
         - name: RUN_LOOP
           value: {{ if .Values.module_a.runLoop }}"1"{{ else }}"0"{{ end }}
@@ -51,9 +51,19 @@ spec:
           value: {{ .Values.module_a.runLoopIntervalSec | quote }}
         - name: DITING_CORE_ROOT
           value: "/app"
+        - name: DITING_SYMBOLS
+          value: "/config/diting_symbols.txt"
+        volumeMounts:
+        - name: symbols-config
+          mountPath: /config
+          readOnly: true
         {{- with .Values.module_a.resources }}
         resources: {{- toYaml . | nindent 10 }}
         {{- end }}
+      volumes:
+      - name: symbols-config
+        configMap:
+          name: diting-semantic-classifier-a-symbols
       {{- with .Values.module_a.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

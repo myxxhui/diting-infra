@@ -1,9 +1,9 @@
 {{- if .Values.ingest.enabled }}
-# 不作为 Hook，避免 Job 失败（如 BackoffLimitExceeded）导致整次 helm upgrade 失败；每次升级用新 revision 创建新 Job 便于排查
+# 不作为 Hook，避免 Job 失败导致整次 helm upgrade 失败；每次 upgrade 用新 revision 创建新 Job；triggerRunAt 用于 make trigger-ingest 强制再跑一次采集
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: diting-ingest-{{ .Release.Revision }}
+  name: diting-ingest-{{ .Release.Revision }}{{- if .Values.ingest.triggerRunAt }}-{{ .Values.ingest.triggerRunAt }}{{- end }}
   namespace: default
   labels:
     app: diting
@@ -27,7 +27,11 @@ spec:
       {{- end }}
       {{- end }}
       restartPolicy: OnFailure
-      # 云原生：init 容器在 DB/Redis 就绪前阻塞，Job 可与 stack 同次部署，无需两阶段
+      volumes:
+      - name: config-symbols
+        configMap:
+          name: diting-ingest-symbols
+      # 云原生：init 先等 DB/Redis 端口，再等建表完成（不阻塞部署终端，由本 Job 内等待）
       initContainers:
       - name: wait-for-deps
         image: busybox:1.36
@@ -41,17 +45,39 @@ spec:
           until nc -z {{ .Values.ingest.postgresL2Host }} {{ .Values.ingest.postgresL2Port }}; do sleep 2; done
           echo "等待 Redis..."
           until nc -z {{ .Values.ingest.redisHost }} {{ .Values.ingest.redisPort }}; do sleep 2; done
-          echo "依赖就绪，启动采集"
+          echo "DB/Redis 就绪"
+      - name: wait-for-tables
+        image: postgres:15-alpine
+        envFrom:
+        - secretRef:
+            name: diting-ingest-conn
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "等待 L1/L2 建表完成（可并行于部署终端）..."
+          until psql "$$TIMESCALE_DSN" -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='ohlcv'" 2>/dev/null | grep -q 1; do echo "等待 L1 ohlcv..."; sleep 5; done
+          until psql "$$TIMESCALE_DSN" -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='a_share_universe'" 2>/dev/null | grep -q 1; do echo "等待 L1 a_share_universe..."; sleep 5; done
+          until psql "$$PG_L2_DSN" -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='data_versions'" 2>/dev/null | grep -q 1; do echo "等待 L2 data_versions..."; sleep 5; done
+          until psql "$$PG_L2_DSN" -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='industry_revenue_summary'" 2>/dev/null | grep -q 1; do echo "等待 L2 industry_revenue_summary..."; sleep 5; done
+          echo "表已就绪，启动采集"
       containers:
       - name: ingest
         image: "{{ .Values.ingest.image.repository }}:{{ .Values.ingest.image.tag }}"
         imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
-        # 每次部署：检查 L1 是否为空/过期，自动全量或增量（见 diting-core scripts/run_ingest_deploy.py）
+        # 每次部署：检查 L1 是否为空/过期，自动全量或增量；DITING_SYMBOLS 指向 ConfigMap 时按指定标的跑，否则全量（见 run_ingest_deploy.py）
         command: ["make", "ingest-deploy"]
+        volumeMounts:
+        - name: config-symbols
+          mountPath: /config
+          readOnly: true
         envFrom:
         - secretRef:
             name: diting-ingest-conn
         env:
+        - name: DITING_SYMBOLS
+          value: "/config/diting_symbols.txt"
         - name: INGEST_DEPLOY_FULL_DAYS_THRESHOLD
           value: {{ .Values.ingest.fullDaysThreshold | quote }}
         - name: INGEST_PRODUCTION_UNIVERSE

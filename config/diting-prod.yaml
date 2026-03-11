@@ -54,10 +54,11 @@ stack:
         storageRequest: 20Gi
 
   # 采集 Job（云原生）：集群内跑 diting-ingest 镜像，启用后不再依赖 REPO_I_ROOT
-  # 详见 docs/ingest-cloud-native.md；镜像来自项目 ACR，本地构建后 make push-images 推送，Chart 使用最新 tag
+  # 详见 docs/ingest-cloud-native.md；镜像来自项目 ACR，本地构建后 make push-images 推送。
+  # 若用 tag: latest 仍看到旧行为：节点可能缓存了 digest；可改为唯一 tag（如日期或 git sha），构建时打同一 tag 并 push，再 deploy。
   # 后半部分实践：enabled=true 时部署/升级会创建 Job 执行 make ingest-deploy（检查后全量/增量）
   ingest:
-    enabled: true
+    enabled: false
     image:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-ingest
       tag: latest
@@ -76,7 +77,12 @@ stack:
     jqdataUser: "13031539952"
     jqdataPassword: "Hui123123"
 
-  # Module A 语义分类器（独立部署）：连接 L1/L2 与 ingest 同源，由 Secret 注入
+  # 建表（Schema Init）：由 Chart 内 Job 执行 L1/L2 建表，与 ingest 同源连接；显式开启避免合并时被覆盖
+  schemaInit:
+    enabled: true
+
+  # 语义分类器-A（Module A）：部署名 diting-semantic-classifier-a；连接 L1/L2 与 ingest 同源，由 Secret 注入；指定标的由 ConfigMap 挂载
+  # 使用生产数据（非 Mock）必须：(1) 若 L1/L2 在集群外，在此覆盖 timescaleHost、postgresL2Host 等指向生产库；(2) chart config/diting_symbols.txt 中已有标的列表（需与 diting-core 一致时可执行 make sync-semantic-classifier-a-symbols）
   # 生产启用时需先构建并推送镜像（diting-core: make build-module-a / push-module-a），并配置 imagePullSecrets
   module_a:
     enabled: true

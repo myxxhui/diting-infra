@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS ohlcv (
     PRIMARY KEY (symbol, period, datetime)
 );
 
--- 仅用两参数 create_hypertable（所有 TS 版本都有）；已是 hypertable 时忽略错误
+-- 仅用两参数 create_hypertable（所有 TS 版本都有）；已是 hypertable 时忽略错误，避免依赖 if_not_exists 或 timescaledb_information
 DO $$
 BEGIN
   PERFORM create_hypertable('ohlcv'::regclass, 'datetime'::name);

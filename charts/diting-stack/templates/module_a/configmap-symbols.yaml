@@ -1,0 +1,13 @@
+{{- if .Values.module_a.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: diting-semantic-classifier-a-symbols
+  namespace: default
+  labels:
+    app: diting
+    component: semantic-classifier-a
+data:
+  diting_symbols.txt: |
+{{ .Files.Get "config/diting_symbols.txt" | indent 4 }}
+{{- end }}

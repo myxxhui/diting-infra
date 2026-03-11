@@ -1,25 +1,29 @@
-# Stage2-01 Schema init Job（dna_stage2_01.schema_init.job_name: diting-schema-init）
-# 执行前须：1) 创建 ConfigMap diting-schema-init-sql（见 jobs/README.md）；2) 存在 Secret diting-db-connection（TIMESCALE_DSN、PG_L2_DSN）
+{{- if .Values.schemaInit.enabled }}
+# 建表 Job：每次 upgrade 创建新 Job（diting-schema-init-<revision>），不阻塞部署；Pod 内脚本会等待 DB 就绪再执行 SQL
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: diting-schema-init
+  name: diting-schema-init-{{ .Release.Revision }}
   namespace: default
   labels:
-    app.kubernetes.io/name: diting-schema-init
-    app.kubernetes.io/component: schema-init
+    app: diting
+    component: schema-init
+  annotations:
+    "helm.sh/resource-policy": keep
 spec:
-  ttlSecondsAfterFinished: 86400
-  backoffLimit: 3
+  ttlSecondsAfterFinished: {{ .Values.schemaInit.ttlSecondsAfterFinished }}
+  backoffLimit: {{ .Values.schemaInit.backoffLimit }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: diting-schema-init
+        app: diting
+        component: schema-init
     spec:
       restartPolicy: OnFailure
       containers:
         - name: schema-init
-          image: timescale/timescaledb-ha:pg14.6-ts2.9.1-p1  # 与 TimescaleDB Chart 一致；Bitnami 镜像连接 TimescaleDB 有 scram 兼容问题
+          image: {{ .Values.schemaInit.image }}
+          imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/sql/run-schema-init.sh"]
           env:
             - name: TIMESCALE_DSN
@@ -40,3 +44,4 @@ spec:
         - name: sql
           configMap:
             name: diting-schema-init-sql
+{{- end }}

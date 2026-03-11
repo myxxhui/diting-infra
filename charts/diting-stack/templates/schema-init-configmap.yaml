@@ -1,0 +1,25 @@
+{{- if .Values.schemaInit.enabled }}
+# 建表 SQL 与执行脚本；部署/升级时由 Chart 更新，供 Job diting-schema-init-<revision> 挂载
+# 增删 SQL 时同步修改此 data 列表与 run-schema-init.sh 执行顺序
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: diting-schema-init-sql
+  namespace: default
+  labels:
+    app: diting
+    component: schema-init
+data:
+  01_l1_ohlcv.sql: |
+{{ .Files.Get "schema-init/sql/01_l1_ohlcv.sql" | nindent 4 }}
+  02_l1_a_share_universe.sql: |
+{{ .Files.Get "schema-init/sql/02_l1_a_share_universe.sql" | nindent 4 }}
+  02_a_share_universe_add_market.sql: |
+{{ .Files.Get "schema-init/sql/02_a_share_universe_add_market.sql" | nindent 4 }}
+  02_l2_data_versions.sql: |
+{{ .Files.Get "schema-init/sql/02_l2_data_versions.sql" | nindent 4 }}
+  03_l2_industry_revenue_summary.sql: |
+{{ .Files.Get "schema-init/sql/03_l2_industry_revenue_summary.sql" | nindent 4 }}
+  run-schema-init.sh: |
+{{ .Files.Get "schema-init/run-schema-init.sh" | nindent 4 }}
+{{- end }}

@@ -1,0 +1,14 @@
+{{- if .Values.ingest.enabled }}
+# 与 chart config/diting_symbols.txt 同源；挂载到 Job 后由 run_ingest_deploy 读取，决定「指定标的」或「全量」
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: diting-ingest-symbols
+  namespace: default
+  labels:
+    app: diting
+    component: ingest
+data:
+  diting_symbols.txt: |
+{{ .Files.Get "config/diting_symbols.txt" | indent 4 }}
+{{- end }}

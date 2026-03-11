@@ -43,7 +43,7 @@ stage2-01-down:
 	@helm uninstall timescaledb -n $(STAGE2_01_NS) 2>/dev/null || true
 	@helm uninstall redis -n $(STAGE2_01_NS) 2>/dev/null || true
 	@helm uninstall postgresql-l2 -n $(STAGE2_01_NS) 2>/dev/null || true
-	@kubectl delete job diting-schema-init -n $(STAGE2_01_NS) 2>/dev/null || true
+	@kubectl delete job -n $(STAGE2_01_NS) -l component=schema-init 2>/dev/null || true
 	@kubectl delete configmap diting-schema-init-sql -n $(STAGE2_01_NS) 2>/dev/null || true
 	@echo "[Stage2-01] K3s 资源清理完成"
 
@@ -87,7 +87,7 @@ PROD_DATA_ENV_ENV     = prod
 CONN_FILE             = $(CURDIR)/prod.conn
 DISK_ID_FILE          = $(CURDIR)/prod.disk_id
 
-.PHONY: deploy-diting-prod down-diting-prod fix-diting-prod-stale-eip deploy-diting-prod-with-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig
+.PHONY: deploy-diting-prod down-diting-prod fix-diting-prod-stale-eip deploy-diting-prod-with-ingest trigger-ingest prod-write-conn apply-acr-pull-secret print-kubeconfig local-schema-init-prod local-ingest-prod local-ingest-deploy-prod local-ingest-production-prod local-ingest-production-prod-background
 
 # 兼容旧命令（推荐使用 make deploy diting prod / make down diting prod）
 deploy-data-db-prod: deploy-diting-prod
@@ -141,7 +141,7 @@ deploy-diting-prod: update-deploy-engine
 	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@echo ""
 	@echo "=========================================="
-	@echo "  部署 Diting Stack（静态 PV/PVC + 采集 Job，Job 内 init 等待 DB 就绪）"
+	@echo "  部署 Diting Stack（先创建 PVC，不阻塞等 init）"
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	ACR_SECRET="$(CURDIR)/charts/diting-stack/manifests/acr-pull-secret.yaml"; \
@@ -150,21 +150,38 @@ deploy-diting-prod: update-deploy-engine
 		kubectl apply -f "$$ACR_SECRET"; \
 	fi; \
 	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
-	STACK_ENABLED=$$(yq eval '.stack.enabled // true' "$$CFG"); \
+	_RAW=$$(yq eval '.stack.enabled // true' "$$CFG" 2>/dev/null); \
+	STACK_ENABLED=$$(echo "$$_RAW" | tr -d ' \t\r\n' | tr '[:upper:]' '[:lower:]'); \
+	if [ -z "$$STACK_ENABLED" ]; then STACK_ENABLED=true; fi; \
 	if [ "$$STACK_ENABLED" = "true" ]; then \
 		TMP=$$(mktemp); \
-		yq eval '{"storage": .stack.storage, "ingest": (.stack.ingest // {}), "module_a": (.stack.module_a // {})}' "$$CFG" > "$$TMP"; \
+		yq eval '{"storage": .stack.storage, "ingest": (.stack.ingest // {}), "module_a": (.stack.module_a // {}), "schemaInit": (.stack.schemaInit // {"enabled": true})}' "$$CFG" > "$$TMP"; \
+		_JOB_COUNT=$$(helm template diting-stack $(CURDIR)/charts/diting-stack -f "$$TMP" 2>/dev/null | grep -c "kind: Job" || echo 0); \
+		if [ "$$_JOB_COUNT" = "0" ]; then \
+			echo "⚠ 合并 values 未渲染出任何 Job，请确认 config 中 stack.schemaInit.enabled 与 stack.ingest.enabled 为 true"; \
+		fi; \
+		if kubectl get secret diting-db-connection -n default -o name 2>/dev/null | grep -q secret; then \
+			echo "为已存在的 Secret diting-db-connection 添加 Helm 元数据以便 upgrade 通过..."; \
+			kubectl label secret diting-db-connection -n default app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null || true; \
+			kubectl annotate secret diting-db-connection -n default meta.helm.sh/release-name=diting-stack meta.helm.sh/release-namespace=default --overwrite 2>/dev/null || true; \
+		fi; \
 		if helm list -n default | grep -q diting-stack; then \
-			helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
+			helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP"; _EC=$$?; \
 		else \
-			helm install diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
+			helm install diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP"; _EC=$$?; \
 		fi; \
 		rm -f "$$TMP"; \
-		echo "✅ Diting Stack 部署完成（ingest Job、module_a Deployment 由 init 等待 DB 就绪后启动）"; \
+		_REV=$$(helm list -n default 2>/dev/null | awk '/diting-stack/{print $$3}'); \
+		echo "✅ Diting Stack 已提交（PVC/Job/Deployment 已创建，终端不阻塞）"; \
+		echo "   本次 revision=$${_REV}；建表 Job: diting-schema-init-$${_REV}，采集 Job: diting-ingest-$${_REV}"; \
+		echo "   当前 default 命名空间内 diting Job："; kubectl get jobs -n default -l app=diting 2>/dev/null || true; \
+		if ! kubectl get jobs -n default -l app=diting --no-headers 2>/dev/null | grep -q .; then \
+			echo "   若无 Job：可运行 helm get manifest diting-stack -n default | grep -A2 'kind: Job' 检查 release 是否含 Job"; \
+		fi; \
 	fi
 	@echo ""
 	@echo "=========================================="
-	@echo "  部署数据库（官方 Bitnami Chart）"
+	@echo "  部署数据库（Stack 已创建 PVC，DB 就绪后 init 会自动通过）"
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
@@ -207,6 +224,15 @@ deploy-diting-prod: update-deploy-engine
 			--wait --timeout=5m; \
 		echo "✅ Redis 完成"; \
 	fi
+	@echo ""
+	@echo "  等待 Stack 业务 Pod（ingest/语义分类器-A）init 通过（最多 120s）..."
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12; do \
+		READY=$$(kubectl get deployment diting-semantic-classifier-a -n default -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0"); \
+		[ "$$READY" = "1" ] && echo "✅ 语义分类器-A 已就绪" && break; \
+		[ $$i -eq 12 ] && echo "⚠️  语义分类器-A 未就绪，可稍后 kubectl get pod -n default 查看"; \
+		sleep 10; \
+	done
 	@$(MAKE) -f $(CURDIR)/Makefile prod-write-conn
 	@echo ""
 	@echo "=========================================="
@@ -238,8 +264,13 @@ deploy-diting-prod: update-deploy-engine
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	if [ -f "$$KUBECONFIG" ] && kubectl cluster-info --request-timeout=5s &>/dev/null; then \
+		_REV=$$(helm list -n default 2>/dev/null | awk '/diting-stack/{print $$3}'); \
 		echo ""; echo "kubectl get nodes:"; kubectl get nodes 2>/dev/null || true; \
 		echo ""; echo "kubectl get pods -A:"; kubectl get pods -A 2>/dev/null || true; \
+		echo ""; echo "建表/采集 Job（本次 revision=$${_REV}，每次 deploy 会新建 diting-schema-init-N、diting-ingest-N）："; \
+		kubectl get jobs -n default -l app=diting 2>/dev/null || true; \
+		echo ""; echo "查看建表日志: kubectl logs job/diting-schema-init-$${_REV} -n default --tail=50"; \
+		echo "查看采集日志: kubectl logs job/diting-ingest-$${_REV} -n default -f"; \
 	fi
 	@echo ""
 	@echo "当前终端立即生效 KUBECONFIG（复制执行）："
@@ -255,9 +286,80 @@ prod-write-conn:
 	@scripts/prod-write-conn.sh "$(CONFIG_ROOT)" "$(DEPLOY_ENGINE_DIR)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 	@echo "连接信息已写入 $(CONN_FILE)（若脚本未实现则需人工填写 EIP 与 NodePort）"
 
+# 本地一键建表：用 prod.conn 连接生产 L1/L2，执行 Chart 内建表 SQL（与集群 Job 同序）
+# 前置: prod.conn 存在（make deploy diting prod 或 make prod-write-conn）；本机可访问 EIP NodePort
+local-schema-init-prod:
+	@bash "$(CURDIR)/scripts/local-schema-init-prod.sh" "$(CONN_FILE)"
+
+# 本地一键采集（测试集）：用 prod.conn 作为 .env，执行 ingest-test（约 15 标，快速验证表与管道）
+# 前置: REPO_I_ROOT 指向 diting-core 根目录；prod.conn 存在
+local-ingest-prod:
+	@if [ -z "$$REPO_I_ROOT" ] || [ ! -d "$$REPO_I_ROOT" ]; then \
+		echo "错误: 请设置 REPO_I_ROOT 指向 diting-core 根目录，例如: export REPO_I_ROOT=../diting-core"; exit 1; \
+	fi; \
+	if [ ! -f "$(CONN_FILE)" ]; then \
+		echo "错误: $(CONN_FILE) 不存在，请先执行 make deploy diting prod 或 make prod-write-conn"; exit 1; \
+	fi; \
+	echo "使用 $(CONN_FILE) 写入 $$REPO_I_ROOT/.env 并执行 make ingest-test（测试集，约 15 标）..."; \
+	cp "$(CONN_FILE)" "$$REPO_I_ROOT/.env" && $(MAKE) -C "$$REPO_I_ROOT" ingest-test && echo "✅ 本地采集（测试集）完成"
+
+# 本地一键采集（与集群一致）：执行 ingest-deploy（检查 L1 后自动全量或增量，满足 Module A/B 生产数据需求）
+# 耗时长时建议用 make trigger-ingest 在集群跑，合上电脑也会继续
+local-ingest-deploy-prod:
+	@if [ -z "$$REPO_I_ROOT" ] || [ ! -d "$$REPO_I_ROOT" ]; then \
+		echo "错误: 请设置 REPO_I_ROOT 指向 diting-core 根目录"; exit 1; \
+	fi; \
+	if [ ! -f "$(CONN_FILE)" ]; then \
+		echo "错误: $(CONN_FILE) 不存在，请先执行 make deploy diting prod 或 make prod-write-conn"; exit 1; \
+	fi; \
+	echo "使用 $(CONN_FILE) 写入 $$REPO_I_ROOT/.env 并执行 make ingest-deploy（与集群 Job 一致，全量/增量）..."; \
+	cp "$(CONN_FILE)" "$$REPO_I_ROOT/.env" && $(MAKE) -C "$$REPO_I_ROOT" ingest-deploy && echo "✅ 本地采集（deploy）完成"
+
+# 本地一键生产全量采集（符合 AB 模块数据要求，与 06_ 实践一致）：执行 make ingest-production（全 A 股 + 单标≥5 年 + 行业/财务 + 新闻）
+# 前置: REPO_I_ROOT、prod.conn；本机可访问生产 EIP NodePort
+local-ingest-production-prod:
+	@if [ -z "$$REPO_I_ROOT" ] || [ ! -d "$$REPO_I_ROOT" ]; then \
+		echo "错误: 请设置 REPO_I_ROOT 指向 diting-core 根目录，例如: export REPO_I_ROOT=../diting-core"; exit 1; \
+	fi; \
+	if [ ! -f "$(CONN_FILE)" ]; then \
+		echo "错误: $(CONN_FILE) 不存在，请先执行 make deploy diting prod 或 make prod-write-conn"; exit 1; \
+	fi; \
+	echo "使用 $(CONN_FILE) 写入 $$REPO_I_ROOT/.env 并执行 make ingest-production（生产全量，符合 AB 模块）..."; \
+	cp "$(CONN_FILE)" "$$REPO_I_ROOT/.env" && $(MAKE) -C "$$REPO_I_ROOT" ingest-production && echo "✅ 本地生产全量采集完成"
+
+# 同上，但后台运行：复制 prod.conn 后调用 diting-core 的 make ingest-production-background（日志默认本仓 ingest-production.log）
+# 说明: 合上笔记本盖后本机可能休眠会暂停进程；若需合盖也继续请用 make trigger-ingest（集群）或 SSH 到服务器执行
+INGEST_PROD_LOG ?= $(CURDIR)/ingest-production.log
+local-ingest-production-prod-background:
+	@if [ -z "$$REPO_I_ROOT" ] || [ ! -d "$$REPO_I_ROOT" ]; then \
+		echo "错误: 请设置 REPO_I_ROOT 指向 diting-core 根目录"; exit 1; \
+	fi; \
+	if [ ! -f "$(CONN_FILE)" ]; then \
+		echo "错误: $(CONN_FILE) 不存在，请先执行 make deploy diting prod 或 make prod-write-conn"; exit 1; \
+	fi; \
+	cp "$(CONN_FILE)" "$$REPO_I_ROOT/.env"; \
+	$(MAKE) -C "$$REPO_I_ROOT" ingest-production-background INGEST_PROD_LOG="$(INGEST_PROD_LOG)"
+
 # 输出 export KUBECONFIG=... 供当前终端生效：eval $(make -C diting-infra print-kubeconfig)
 print-kubeconfig:
 	@echo "export KUBECONFIG=\"$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)\""
+
+# 在不做完整 deploy 的情况下再跑一次采集：helm upgrade 注入 triggerRunAt，创建新 Job（如 diting-ingest-3-1734567890）
+# 要求：已执行过 make deploy diting prod，且 stack.ingest.enabled=true
+trigger-ingest:
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
+	STACK_ENABLED=$$(yq eval '.stack.enabled // true' "$$CFG"); \
+	if [ "$$STACK_ENABLED" != "true" ]; then echo "错误: stack.enabled 非 true"; exit 1; fi; \
+	if ! helm list -n default | grep -q diting-stack; then echo "错误: 请先执行 make deploy diting prod"; exit 1; fi; \
+	TMP=$$(mktemp); \
+	yq eval '{"storage": .stack.storage, "ingest": (.stack.ingest // {}), "module_a": (.stack.module_a // {})}' "$$CFG" > "$$TMP"; \
+	_TS=$$(date +%s); \
+	helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --set ingest.triggerRunAt=$$_TS; \
+	rm -f "$$TMP"; \
+	_REV=$$(helm list -n default 2>/dev/null | awk '/diting-stack/{print $$3}'); \
+	echo "✅ 已创建新采集 Job: diting-ingest-$$_REV-$$_TS"; \
+	echo "   查看: kubectl get jobs -n default -l component=ingest && kubectl logs job/diting-ingest-$$_REV-$$_TS -n default -f"
 
 # 将 ACR 拉取凭证 Secret 应用到当前 KUBECONFIG 指向的集群（default 命名空间）
 # 需存在 charts/diting-stack/manifests/acr-pull-secret.yaml；make deploy diting prod 时若存在该文件会自动 apply
@@ -267,6 +369,12 @@ apply-acr-pull-secret:
 		echo "错误: 不存在 $$ACR_SECRET，请从同目录 acr-pull-secret.yaml.example 复制并填写或使用项目提供的凭证文件"; exit 1; \
 	fi; \
 	kubectl apply -f "$$ACR_SECRET" && echo "✅ ACR 拉取凭证已应用（Secret acr-titan）"
+
+# 将 diting-core 的 config/diting_symbols.txt 同步到 chart config/，供 语义分类器-A ConfigMap 使用；部署前执行后 make deploy diting prod 即跑指定标的
+DITING_CORE ?= $(CURDIR)/../diting-core
+sync-semantic-classifier-a-symbols:
+	@if [ ! -f "$(DITING_CORE)/config/diting_symbols.txt" ]; then echo "错误: 不存在 $(DITING_CORE)/config/diting_symbols.txt，请设置 DITING_CORE 或在与 diting-infra 平级的 diting-core 中准备该文件"; exit 1; fi
+	@cp "$(DITING_CORE)/config/diting_symbols.txt" "$(CURDIR)/charts/diting-stack/config/diting_symbols.txt" && echo "✅ 已同步 diting_symbols.txt 到 chart config/，可执行 make deploy diting prod"
 
 # 后半部分：Up 后执行采集落库（C3）。需设置 REPO_I_ROOT 指向 diting-core 根目录
 deploy-diting-prod-with-ingest: deploy-diting-prod
@@ -303,8 +411,9 @@ down-diting-prod:
 	@echo "=========================================="
 	@echo "  卸载数据库 Release（官方 Chart）"
 	@echo "=========================================="
-	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	if kubectl cluster-info &>/dev/null; then \
+	@export KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)}"; \
+	_KCI=0; (kubectl --request-timeout=5s cluster-info &>/dev/null) || _KCI=$$?; \
+	if [ "$$_KCI" = "0" ]; then \
 		for r in timescaledb postgresql-l2 redis; do helm uninstall "$$r" -n default 2>/dev/null || true; done; \
 		echo "等待 Pod 终止..."; sleep 10; \
 		echo "✅ 数据库 Release 已卸载"; \
@@ -315,8 +424,9 @@ down-diting-prod:
 	@echo "=========================================="
 	@echo "  清理动态 PVC（保留静态 PVC）"
 	@echo "=========================================="
-	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	if kubectl cluster-info &>/dev/null; then \
+	@export KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)}"; \
+	_KCI=0; (kubectl --request-timeout=5s cluster-info &>/dev/null) || _KCI=$$?; \
+	if [ "$$_KCI" = "0" ]; then \
 		echo "删除 Redis 动态 PVC..."; \
 		kubectl delete pvc -n default -l app.kubernetes.io/instance=redis --ignore-not-found=true || true; \
 		echo "✅ 动态 PVC 已清理"; \
@@ -325,8 +435,9 @@ down-diting-prod:
 	@echo "=========================================="
 	@echo "  卸载 Diting Stack（仅静态 PV/PVC）"
 	@echo "=========================================="
-	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	if kubectl cluster-info &>/dev/null; then \
+	@export KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)}"; \
+	_KCI=0; (kubectl --request-timeout=5s cluster-info &>/dev/null) || _KCI=$$?; \
+	if [ "$$_KCI" = "0" ]; then \
 		STACK_RELEASE=$$(yq eval '.stack.release_name // "diting-stack"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 		STACK_NS=$$(yq eval '.stack.namespace // "default"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 		helm uninstall "$$STACK_RELEASE" -n "$$STACK_NS" 2>/dev/null || true; \
