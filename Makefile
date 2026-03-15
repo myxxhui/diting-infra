@@ -33,7 +33,8 @@ deploy-dev: update-deploy-engine
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROJECT) $(ENV)
 
 # make down [project] [env]：无参数时用 PROJECT/ENV；make down diting prod = 生产数据环境 Down（回收且磁盘保留）
-down:
+# 与 deploy 一致：先 update-deploy-engine，确保使用带 OSS backend 的代码，down 时从 OSS 拉取 state 再销毁
+down: update-deploy-engine
 	@_p=$(word 2,$(MAKECMDGOALS)); _e=$(word 3,$(MAKECMDGOALS)); \
 	if [ "$$_p" = "diting" ] && [ "$$_e" = "prod" ]; then $(MAKE) down-diting-prod; else CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}"; fi
 
@@ -393,9 +394,9 @@ fix-diting-prod-stale-eip: fix-diting-prod-stale-ecs
 # Down 仅释放 ECS 与 EIP（-target=module.ecs），其它资源（VPC、数据盘、NAS、OSS 等）均在 tfvars 中固定且不释放；prod.disk_id 保留供再次 Up 挂载同盘。
 # 约定：ECS 和 EIP 资源必须释放；固定资源见 config/terraform-diting-prod.tfvars 内注释。
 # FULL_DESTROY=1 时：若 Terraform state 中 NAS 访问组为 dev 共享（diting_nas_group_dev）或 tfvars 中非注释行 nas_use_existing_access_group = true，先从 Terraform state 移除该资源，避免误删导致 InvalidAccessGroup.AlreadyAttached
-# 注意：deploy-engine 的 -state= 指向的是编排用 JSON，Terraform 实际使用 deploy/terraform/alicloud/terraform.tfstate（backend local）
+# 注意：deploy-engine 的 -state= 指向的是编排用 JSON；Terraform state 使用 backend（源仓已改为 OSS），down 前须 update-deploy-engine 以用 OSS state 销毁
 # make down diting prod 的实际执行 target
-down-diting-prod:
+down-diting-prod: update-deploy-engine
 	@echo ""
 	@echo "=========================================="
 	@echo "  卸载数据库 Release（官方 Chart）"
