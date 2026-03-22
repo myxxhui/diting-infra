@@ -6,9 +6,10 @@ CREATE TABLE IF NOT EXISTS classifier_output_snapshot (
     id                BIGSERIAL PRIMARY KEY,
     batch_id           VARCHAR(64)  NOT NULL,
     symbol             VARCHAR(32)  NOT NULL,
-    primary_tag        VARCHAR(16)  NOT NULL DEFAULT '未知',
+    primary_tag        VARCHAR(64)  NOT NULL DEFAULT '未知',
     primary_confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
     tags_json          JSONB,
+    segment_shares_json JSONB,
     correlation_id     VARCHAR(64)  NOT NULL DEFAULT '',
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
@@ -19,3 +20,6 @@ CREATE INDEX IF NOT EXISTS idx_classifier_output_snapshot_created ON classifier_
 
 COMMENT ON TABLE classifier_output_snapshot IS 'Module A 分类结果快照，供 Module B 按 batch_id/最新批次读取';
 COMMENT ON COLUMN classifier_output_snapshot.primary_tag IS '领域标签：农业/科技/宏观/未知/自定义，以中文为主便于过滤';
+COMMENT ON COLUMN classifier_output_snapshot.segment_shares_json IS 'Module A 输出的主营/细分列表 JSON（每条含 segment_id、revenue_share、is_primary、disclosure_present），供 Module C 对齐';
+
+-- 已有库增量：ALTER TABLE classifier_output_snapshot ALTER COLUMN primary_tag TYPE VARCHAR(64);
