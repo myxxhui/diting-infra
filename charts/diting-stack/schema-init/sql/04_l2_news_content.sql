@@ -1,11 +1,7 @@
--- L2 PostgreSQL：新闻/公告内容表，供 Module C (MoE 议会) 查询标的相关新闻
--- 由采集写入（run_ingest_news），按 symbol + title_hash + published_at 去重
--- title_hash = md5(title) 在 Python 端计算后写入
--- [Ref: 11_数据采集与输入层规约]
-
+-- sync with diting-infra/schemas/sql/04_l2_news_content.sql
 CREATE TABLE IF NOT EXISTS news_content (
     id           SERIAL PRIMARY KEY,
-    symbol       VARCHAR(32)  NOT NULL,
+    symbol       VARCHAR(32)  DEFAULT NULL,
     source       VARCHAR(32)  NOT NULL DEFAULT 'akshare',
     source_type  VARCHAR(32)  NOT NULL DEFAULT 'news',
     title        TEXT         NOT NULL DEFAULT '',
@@ -14,14 +10,16 @@ CREATE TABLE IF NOT EXISTS news_content (
     url          VARCHAR(1024) NOT NULL DEFAULT '',
     keywords     TEXT         NOT NULL DEFAULT '',
     published_at TIMESTAMP    NOT NULL DEFAULT '1970-01-01',
-    created_at   TIMESTAMP    NOT NULL DEFAULT NOW()
+    created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    scope        VARCHAR(32)  NOT NULL DEFAULT 'symbol',
+    scope_id     VARCHAR(128) NOT NULL DEFAULT ''
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_news_content_dedup
-    ON news_content (symbol, title_hash, published_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_news_content_scope_dedup
+    ON news_content (scope, scope_id, title_hash, published_at);
 
-CREATE INDEX IF NOT EXISTS idx_news_content_symbol ON news_content (symbol);
-CREATE INDEX IF NOT EXISTS idx_news_content_published ON news_content (published_at);
-CREATE INDEX IF NOT EXISTS idx_news_content_symbol_pub ON news_content (symbol, published_at DESC);
-
-COMMENT ON TABLE news_content IS 'Module C 输入：每标的新闻/公告原文，title_hash = md5(title) 在 Python 端计算';
+CREATE INDEX IF NOT EXISTS idx_news_content_symbol ON news_content(symbol);
+CREATE INDEX IF NOT EXISTS idx_news_content_published ON news_content(published_at);
+CREATE INDEX IF NOT EXISTS idx_news_content_symbol_pub ON news_content(symbol, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_content_scope_scope_id ON news_content(scope, scope_id);
+CREATE INDEX IF NOT EXISTS idx_news_content_scope_id_pub ON news_content(scope, scope_id, published_at DESC);
