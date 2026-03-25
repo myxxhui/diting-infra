@@ -72,3 +72,8 @@ CREATE INDEX IF NOT EXISTS idx_quant_signal_scan_all_passed ON quant_signal_scan
 CREATE INDEX IF NOT EXISTS idx_quant_signal_scan_all_created ON quant_signal_scan_all(created_at DESC);
 
 COMMENT ON TABLE quant_signal_scan_all IS 'Module B 全量扫描结果（通过/未通过），含池分、双档与建议风控 JSON';
+
+ALTER TABLE quant_signal_snapshot ADD COLUMN IF NOT EXISTS scan_input_ohlcv_max_ts TIMESTAMPTZ;
+ALTER TABLE quant_signal_snapshot ADD COLUMN IF NOT EXISTS scan_input_news_max_ts TIMESTAMPTZ;
+ALTER TABLE quant_signal_scan_all ADD COLUMN IF NOT EXISTS scan_input_ohlcv_max_ts TIMESTAMPTZ;
+ALTER TABLE quant_signal_scan_all ADD COLUMN IF NOT EXISTS scan_input_news_max_ts TIMESTAMPTZ;
