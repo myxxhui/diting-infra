@@ -1,0 +1,19 @@
+# 复制为 redis-values-prod.yaml 后按需修改；Makefile 部署 Redis 时用 -f 引用。
+# Bitnami Chart：master.service.nodePorts.redis 须为字符串类型。
+# NodePort 须与 prod-write-conn.sh、Makefile、对外文档一致。
+
+auth:
+  enabled: false
+
+master:
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: local-path
+  service:
+    type: NodePort
+    nodePorts:
+      redis: "30379"
+
+volumePermissions:
+  enabled: true

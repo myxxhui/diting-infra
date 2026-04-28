@@ -23,20 +23,25 @@ ALICLOUD_SECRET_KEY=你的 AccessKey Secret
 
 ## 端口与连接变量（固定暴露端口）
 
-依赖组件暴露端口在 **`diting-prod.yaml` → `ports`** 中统一固定，Makefile、`prod-write-conn.sh` 与本文档一致。
+**单一来源**：`Makefile` 部署 Helm（TimescaleDB/L2）与 `scripts/prod-write-conn.sh` 写入 `prod.conn` 使用**同一套解析逻辑**，避免「集群 NodePort」与「连接串端口」不一致：
 
-| 组件 | 环境 | 端口 | 说明 | 连接变量 / 用途 |
+1. **L1/L2**：优先 `stack.databases.timescaledb.service.nodePort` / `stack.databases.postgres_l2.service.nodePort`；若未设则用顶层 **`ports.timescaledb`** / **`ports.postgres_l2`**；若仍未设则默认 **30432 / 30433**。  
+2. **Redis**：优先 **`config/redis-values-prod.yaml`** 内 `master.service.nodePorts.redis`；若无该文件则回退 **`ports.redis`**（默认 **30379**）。
+
+换环境时请将 **`diting-prod.yaml.example`**、**`redis-values-prod.yaml.example`** 复制为同名文件（去掉 `.example`）并按需修改端口与存储。
+
+| 组件 | 环境 | 默认端口（未覆盖 stack/ports 时） | 说明 | 连接变量 / 用途 |
 |------|------|------|------|------------------|
 | TimescaleDB (L1) | 本地 Compose | 15432 | 映射容器 5432 | `TIMESCALE_DSN` host 端口 |
 | PostgreSQL L2 | 本地 Compose | 15433 | 映射容器 5432 | `PG_L2_DSN` host 端口 |
 | Redis | 本地 Compose | 15479 | 映射容器 6379 | `REDIS_URL` host 端口 |
-| TimescaleDB (L1) | 远程 K3s NodePort | **30432** | 固定 NodePort | `TIMESCALE_DSN` = `postgresql://…@<EIP>:30432/postgres` |
-| PostgreSQL L2 | 远程 K3s NodePort | **30433** | 固定 NodePort | `PG_L2_DSN` = `postgresql://…@<EIP>:30433/diting_l2` |
-| Redis | 远程 K3s NodePort | **30379** | 固定 NodePort | `REDIS_URL` = `redis://<EIP>:30379/0` |
+| TimescaleDB (L1) | 远程 K3s NodePort | **30432**（可改为 stack 内 nodePort） | NodePort | `TIMESCALE_DSN` = `postgresql://…@<EIP>:<端口>/postgres` |
+| PostgreSQL L2 | 远程 K3s NodePort | **30433**（可改为 stack 内 nodePort） | NodePort | `PG_L2_DSN` = `postgresql://…@<EIP>:<端口>/diting_l2` |
+| Redis | 远程 K3s NodePort | **30379**（以 redis-values 为准） | NodePort | `REDIS_URL` = `redis://<EIP>:<端口>/0` |
 | SSH | ECS 主机 | **22** | 安全组 / get-kubeconfig | 登录 ECS |
 | K3s API | ECS 主机 | **6443** | 安全组 / kubeconfig server | `KUBECONFIG` 中 server 端口 |
 
-- **修改端口**：仅改 `config/diting-prod.yaml` 中 `ports.*`，勿在 Makefile 或脚本中写死；`prod-write-conn.sh` 会从该 YAML 读取并写入 `prod.conn`。
+- **修改端口**：改 `stack.databases.*.service.nodePort` 与/或顶层 `ports.*`，并同步 **`redis-values-prod.yaml`**；勿在 Makefile 中写死。
 - **prod.conn**：Up 后由 `scripts/prod-write-conn.sh` 生成，含 `TIMESCALE_DSN`、`PG_L2_DSN`、`REDIS_URL`、`KUBECONFIG`、`PUBLIC_IP`（EIP + 上表 NodePort）。
 
 ## 应用侧环境变量（diting-core）
@@ -93,8 +98,19 @@ nas_existing_access_group_name = "deploy-engine_nas_group_prod"
 
 再执行 `make deploy diting prod`。
 
+## 配置文件与示例（换环境可复制）
+
+| 正式文件（勿提交密钥） | 示例模板（可提交 Git） |
+|------------------------|-------------------------|
+| `diting-prod.yaml` | **`diting-prod.yaml.example`** |
+| `terraform-diting-prod.tfvars`（已在 .gitignore） | **`terraform-diting-prod.tfvars.example`** |
+| `redis-values-prod.yaml` | **`redis-values-prod.yaml.example`** |
+| `deploy.yaml` | 见文件头注释；与 **deploy-engine** 示例一致时可参考 `deploy-engine/config/deploy.yaml` |
+
+拉代码后：复制 `.example` 为正式文件名，按注释填写；**prod** 的 Terraform 变量务必复制 **terraform-diting-prod.tfvars.example** → **terraform-diting-prod.tfvars**。
+
 ## 其他
 
-- **diting-prod.yaml**：生产部署配置。是否安装 TimescaleDB / PostgreSQL L2 / Redis 等由 **deploy_control** 统一控制（`enable_timescaledb`、`enable_postgres_l2`、`enable_redis`），deploy-engine 与 Makefile 均据此执行，勿在 Makefile 中写死逻辑。**固定端口**见本文件顶层 **`ports`**（TimescaleDB 30432、PostgreSQL L2 30433、Redis 30379、SSH 22、K3s API 6443），与上表「端口与连接变量」一致。**数据继承与静态存储**：生产环境通过静态 PV/PVC（固定 hostPath）实现 Down 后数据保留、再次 Up 挂载同盘；配置见本文件 `stack.storage`、`stack.databases`，Chart 见仓库内 `charts/diting-stack`。实践与验证步骤见文档仓 [06_生产级数据要求_实践](../diting-doc/04_阶段规划与实践/Stage2_数据采集与存储/06_生产级数据要求_实践.md)。
-- `diting-dev.yaml`：开发环境部署配置。
-- `deploy.yaml`：deploy-engine 入口配置。
+- **diting-prod.yaml**：生产部署配置。是否安装 TimescaleDB / PostgreSQL L2 / Redis 由 **deploy_control**（`enable_timescaledb`、`enable_postgres_l2`、`enable_redis`）控制；**端口**见上文「单一来源」。**数据继承与静态存储**：`stack.storage`、`stack.databases`，Chart 见 `charts/diting-stack`。采集 Job、`data_ingestion` 键说明见 **`diting-prod.yaml.example`** 与文档仓 [06_生产级数据要求_实践](../../diting-doc/04_阶段规划与实践/Stage2_数据采集与存储/06_生产级数据要求_实践.md)。
+- **diting-dev.yaml**：本仓未随附时，可参考 **deploy-engine** 的 `config/myapp-dev.yaml` 或从 **`diting-prod.yaml.example`** 精简出 dev 专用配置。
+- **deploy.yaml**：deploy-engine 入口配置（本仓 `config/deploy.yaml` 为占位示例，可按项目改名或覆盖）。

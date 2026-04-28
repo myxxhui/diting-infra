@@ -1,0 +1,140 @@
+# ==============================================================================
+# 生产环境示例（复制为 diting-prod.yaml 后填写；勿提交含密钥的真实文件）
+# make deploy diting prod / make down diting prod 由此驱动。
+# ==============================================================================
+
+# 可选：对外固定 NodePort（仅文档/兼容）；未设置时以 stack.databases.*.service.nodePort 为准，
+# 若也未设置则回退为 30432/30433（与 Makefile、prod-write-conn.sh 一致）
+ports:
+  timescaledb: 30432
+  postgres_l2: 30433
+  redis: "30379"
+
+global:
+  project_name: "diting"
+  k3s:
+    apiServer:
+      domain: "k3s-diting-prod.example.com"
+
+# 是否在集群内部署 TimescaleDB(L1)/PostgreSQL(L2)/Redis（Makefile 读取此处）
+deploy_control:
+  enable_timescaledb: true
+  enable_postgres_l2: true
+  enable_redis: true
+  k3s_storage_plugin: "local-path"
+  timescaledb_storage:
+    size: "50Gi"
+    storage_class: "local-path"
+  postgres_l2_storage:
+    size: "20Gi"
+    storage_class: "local-path"
+  redis_storage:
+    size: "10Gi"
+    storage_class: "local-path"
+
+stack:
+  enabled: true
+  chart_path: "charts/diting-stack"
+  release_name: "diting-stack"
+  namespace: "default"
+
+  storage:
+    dataPath: /mnt/titan-data/postgres
+    timescaledb:
+      enabled: true
+      pv:
+        name: timescaledb-data-pv
+        capacity: 50Gi
+        subPath: timescaledb
+        reclaimPolicy: Retain
+      pvc:
+        name: data-timescaledb-postgresql-0
+        namespace: default
+        accessMode: ReadWriteOnce
+        storageRequest: 50Gi
+    postgresL2:
+      enabled: true
+      pv:
+        name: postgresql-l2-data-pv
+        capacity: 20Gi
+        subPath: postgresql-l2
+        reclaimPolicy: Retain
+      pvc:
+        name: data-postgresql-l2-0
+        namespace: default
+        accessMode: ReadWriteOnce
+        storageRequest: 20Gi
+
+  # 可选：集群内 ingest / Module A；镜像填自有 ACR，密钥勿入库
+  ingest:
+    enabled: false
+    image:
+      repository: "<YOUR_ACR>/diting-ingest"
+      tag: "test"
+      pullPolicy: IfNotPresent
+    imagePullSecrets: []
+    timescaleUser: "postgres"
+    timescalePassword: "postgres"
+    postgresL2User: "postgres"
+    postgresL2Password: "postgres"
+    ingestSource: akshare
+    jqdataDateStart: "2025-01-01"
+    jqdataDateEnd: "2025-12-31"
+    jqdataUser: ""
+    jqdataPassword: ""
+
+  schemaInit:
+    enabled: true
+
+  module_a:
+    enabled: false
+    image:
+      repository: "<YOUR_ACR>/diting-module-a"
+      tag: latest
+      pullPolicy: Always
+    imagePullSecrets: []
+    timescaleUser: "postgres"
+    timescalePassword: "postgres"
+    postgresL2User: "postgres"
+    postgresL2Password: "postgres"
+    runLoop: false
+    runLoopIntervalSec: 86400
+
+  databases:
+    timescaledb:
+      enabled: true
+      auth:
+        username: postgres
+        password: postgres
+        database: postgres
+      persistence:
+        existing_claim: "data-timescaledb-postgresql-0"
+      service:
+        type: NodePort
+        nodePort: 30432
+    postgres_l2:
+      enabled: true
+      auth:
+        username: postgres
+        password: postgres
+        database: diting_l2
+      persistence:
+        existing_claim: "data-postgresql-l2-0"
+      service:
+        type: NodePort
+        nodePort: 30433
+    redis:
+      enabled: true
+      auth_enabled: false
+      persistence:
+        existing_claim: "data-redis-master-0"
+        size: "10Gi"
+        storage_class: "local-path"
+
+# Up 后采集：远程 K3s Job（charts/ingest）见 06_生产级数据要求_实践
+data_ingestion:
+  enabled: true
+  use_k3s_job: true
+  image: "diting-ingest:test"
+  target: "ingest-test-real"
+  core_repo_path: ""

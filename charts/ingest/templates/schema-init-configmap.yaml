@@ -1,0 +1,21 @@
+# Schema init 所需 SQL 与脚本；由 pre-install hook Job 挂载
+# [Ref: 06_生产级数据要求_实践]
+# 使用 pre-install hook 且 weight -10，确保在 schema-init Job（weight -5）之前创建，否则 Hook 先于非 Hook 资源导致 Pod 找不到 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: diting-schema-init-sql
+  namespace: {{ .Values.namespace | default "default" }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+  labels:
+    app.kubernetes.io/name: diting-ingest
+    app.kubernetes.io/component: schema-init
+data:
+  01_l1_ohlcv.sql: |
+{{ .Files.Get "sql/01_l1_ohlcv.sql" | nindent 4 }}
+  02_l2_data_versions.sql: |
+{{ .Files.Get "sql/02_l2_data_versions.sql" | nindent 4 }}
+  run-schema-init.sh: |
+{{ .Files.Get "sql/run-schema-init.sh" | nindent 4 }}
