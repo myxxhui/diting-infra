@@ -1,5 +1,5 @@
--- L2：B 轨候选快照，B 模块写入，Module C（track=b）与信号层 refresh 消费
--- [Ref: 03_/B轨/02_B轨数据与存储规约, 01_B轨系统设计]
+-- L2：`long_term_candidate`/中长期候选链快照表（表名 `b_track_*` 为历史兼容），B 模块写入，Module C 与信号层 refresh 消费
+-- [Ref: diting-doc _共享规约/11_数据采集与输入层规约, 平台与产品/01_需求与产品范围]
 -- DITING_TRACK=b 时 run_module_c 与 run_refresh_segment_signals 从此表取 symbols
 
 CREATE TABLE IF NOT EXISTS b_track_candidate_snapshot (
