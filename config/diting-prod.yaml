@@ -82,8 +82,8 @@ stack:
     enabled: true
 
   # 语义分类器-A（Module A）：部署名 diting-semantic-classifier-a；连接 L1/L2 与 ingest 同源，由 Secret 注入；指定标的由 ConfigMap 挂载
-  # 使用生产数据（非 Mock）必须：(1) 若 L1/L2 在集群外，在此覆盖 timescaleHost、postgresL2Host 等指向生产库；(2) chart config/diting_symbols.txt 中已有标的列表（需与 diting-core 一致时可执行 make sync-semantic-classifier-a-symbols）
-  # 生产启用时需先构建并推送镜像（diting-core: make build-module-a / push-module-a），并配置 imagePullSecrets
+  # 使用生产数据（非 Mock）必须：(1) 若 L1/L2 在集群外，在此覆盖 timescaleHost、postgresL2Host 等指向生产库；(2) chart config/diting_symbols.txt 中已有标的列表（需与 diting-src 一致时可执行 make sync-semantic-classifier-a-symbols）
+  # 生产启用时需先构建并推送镜像（diting-src: make build-module-a / push-module-a），并配置 imagePullSecrets
   module_a:
     enabled: true
     image:

@@ -6,7 +6,7 @@
 # 当该文件含有效标的时 run_ingest_deploy 按「指定标的」跑（全量/增量均为该列表）；文件为空或仅注释时按「全量」跑（全 A 股或测试集增量）。
 ingest:
   enabled: false
-  # 生产环境（config/diting-prod.yaml）覆盖为项目 ACR + tag latest；diting-core 执行 make build-images 构建，make push-images 推送（需 DITING_ACR_PASSWORD）
+  # 生产环境（config/diting-prod.yaml）覆盖为项目 ACR + tag latest；diting-src 执行 make build-images 构建，make push-images 推送（需 DITING_ACR_PASSWORD）
   image:
     repository: diting-ingest
     tag: test
@@ -91,7 +91,7 @@ storage:
       storageRequest: 20Gi
 
 # 语义分类器-A（Module A）：连接 L1/L2 由 Secret 注入，与 ingest 同源；部署资源名 diting-semantic-classifier-a
-# 使用生产数据（非 Mock）必须：(1) timescaleHost/postgresL2Host 指向含生产数据的库（集群外库请在 config 覆盖）；(2) chart config/diting_symbols.txt 中已有标的列表（与 diting-core 一致时可执行 make sync-semantic-classifier-a-symbols 同步）
+# 使用生产数据（非 Mock）必须：(1) timescaleHost/postgresL2Host 指向含生产数据的库（集群外库请在 config 覆盖）；(2) chart config/diting_symbols.txt 中已有标的列表（与 diting-src 一致时可执行 make sync-semantic-classifier-a-symbols 同步）
 module_a:
   enabled: false
   image:
@@ -112,7 +112,7 @@ module_a:
   # 长期运行：RUN_LOOP=1 时每 24h 执行一次全量分类
   runLoop: false
   runLoopIntervalSec: 86400
-  # 指定标的：由 ConfigMap 挂载 chart config/diting_symbols.txt，Pod 读 DITING_SYMBOLS=/config/diting_symbols.txt；该文件已有标的数据时直接 deploy 即可，需与 diting-core 一致时可执行 make sync-semantic-classifier-a-symbols
+  # 指定标的：由 ConfigMap 挂载 chart config/diting_symbols.txt，Pod 读 DITING_SYMBOLS=/config/diting_symbols.txt；该文件已有标的数据时直接 deploy 即可，需与 diting-src 一致时可执行 make sync-semantic-classifier-a-symbols
   resources:
     requests:
       memory: "128Mi"

@@ -2,7 +2,7 @@
 
 ## 目标
 
-在生产环境（K3s 集群）内用 **Kubernetes Job/CronJob + 镜像** 跑数据采集，不再依赖本机 `REPO_I_ROOT` 与 `make -C diting-core ingest-test`。
+在生产环境（K3s 集群）内用 **Kubernetes Job/CronJob + 镜像** 跑数据采集，不再依赖本机 `REPO_I_ROOT` 与 `make -C diting-src ingest-test`。
 
 ## 原则
 
@@ -51,7 +51,7 @@ Job 在集群内，直接使用 K8s Service 名，无需公网 IP / NodePort：
 
 **每次部署**（Helm post-install/post-upgrade）触发一次 Job，执行 `make ingest-deploy`：
 
-- 脚本 `diting-core/scripts/run_ingest_deploy.py` 连接 L1，检查 `ohlcv` 表是否存在、是否有数据、`MAX(datetime)` 是否在阈值内。
+- 脚本 `diting-src/scripts/run_ingest_deploy.py` 连接 L1，检查 `ohlcv` 表是否存在、是否有数据、`MAX(datetime)` 是否在阈值内。
 - **无数据或超过 N 天未更新**（默认 7 天，可配 `INGEST_DEPLOY_FULL_DAYS_THRESHOLD` / values `ingest.fullDaysThreshold`）→ 执行**全量**（`run_ingest_production.py`）。
 - **有数据且未过期** → 执行**增量**（当前用 `run_ingest_test.py` 做轻量刷新；后续可替换为真实增量逻辑）。
 
@@ -69,7 +69,7 @@ Job 在集群内，直接使用 K8s Service 名，无需公网 IP / NodePort：
 ## 与现有流程的关系
 
 - **保留**：`REPO_I_ROOT` + 本机 `make ingest-test` 仍可用于**本地/CI 验证**或未上 K8s 的环境。  
-- **生产**：部署完成后由 **Job/CronJob + 镜像** 在集群内执行采集，不再依赖本机 diting-core 目录；`data_ingestion.enabled` 可仅控制「是否创建/调度该 Job 或 CronJob」。
+- **生产**：部署完成后由 **Job/CronJob + 镜像** 在集群内执行采集，不再依赖本机 diting-src 目录；`data_ingestion.enabled` 可仅控制「是否创建/调度该 Job 或 CronJob」。
 
 ## 实现清单（diting-infra）
 
@@ -77,7 +77,7 @@ Job 在集群内，直接使用 K8s Service 名，无需公网 IP / NodePort：
 - [ ] 用 **Secret** 存 `TIMESCALE_DSN`、`PG_L2_DSN`、`REDIS_URL`（或从 values 生成），Job 通过 `envFrom` 或 `env` 引用。
 - [ ] 镜像地址与 tag 可配置（values 或 diting-prod.yaml），默认可用 `diting-ingest:test`，生产建议带 tag。
 - [ ] Makefile：部署完数据库后 `helm upgrade` 带上 ingest 相关 values，或单独 `kubectl apply -f` Job（若未用 Helm 管理 Job）。
-- [ ] （可选）CI 在 diting-core 内构建并推送 `diting-ingest:$SHA`，部署时传入该 tag。
+- [ ] （可选）CI 在 diting-src 内构建并推送 `diting-ingest:$SHA`，部署时传入该 tag。
 
 详见 `charts/diting-stack/templates/ingest/` 下 Job 与 Secret 模板。
 

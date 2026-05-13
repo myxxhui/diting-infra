@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Stage2-06 生产数据环境后半部分：10 步按序执行，任一步失败则先回收环境再退出。
-# 用法: INFRA=/path/to/diting-infra CORE=/path/to/diting-core [INGEST_IMAGE=registry/ns/diting-ingest:test] scripts/prod-run-phase2-steps.sh
+# 用法: INFRA=/path/to/diting-infra CORE=/path/to/diting-src [INGEST_IMAGE=registry/ns/diting-ingest:test] scripts/prod-run-phase2-steps.sh
 # 要求: 本机可连通 prod（47.86.243.240:30432/30433/30379）；采集镜像已推送到集群可拉取的 registry 时设置 INGEST_IMAGE。
 # [Ref: 06_生产级数据要求_实践]
 
 set -e
 INFRA="${INFRA:?请设置 INFRA 为 diting-infra 根目录}"
-CORE="${CORE:?请设置 CORE 为 diting-core 根目录}"
+CORE="${CORE:?请设置 CORE 为 diting-src 根目录}"
 
 # 可选：跳过前置连通性检查（SKIP_REACH_CHECK=1）
 if [ "${SKIP_REACH_CHECK:-0}" != "1" ]; then
@@ -33,7 +33,7 @@ cleanup_on_fail() {
   exit 1
 }
 
-echo "========== 步骤 1: 复制 prod.conn → diting-core/.env =========="
+echo "========== 步骤 1: 复制 prod.conn → diting-src/.env =========="
 cp -f "$INFRA/prod.conn" "$CORE/.env" || cleanup_on_fail 1
 echo "步骤 1 通过."
 

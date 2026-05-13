@@ -1,5 +1,5 @@
 -- L2 PostgreSQL：Module B 量化扫描结果快照，按批次存放，供 Module C 按 batch_id/最新批次读取
--- 由 Module B 扫描完成后写入；与 diting-core/scripts/init_l2_quant_signal_table.py、l2_snapshot_writer 对齐
+-- 由 Module B 扫描完成后写入；与 diting-src/scripts/init_l2_quant_signal_table.py、l2_snapshot_writer 对齐
 -- [Ref: 02_量化扫描引擎_实践, 09_核心模块架构规约, Stage3 规约, 02_B模块策略_策略实现规约 §8]
 
 -- 通过阈值的候选：供 Module C 消费（含 A 轨短线预警/确认任一档 + 建议风控字段）

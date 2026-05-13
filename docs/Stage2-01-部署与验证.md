@@ -9,7 +9,7 @@
 |------|------|
 | **REPO_A_ROOT** | diting-infra 仓库路径（本仓） |
 | **KUBECONFIG** | 已就绪的 K3s 集群（如 Stage1-03/04 产出） |
-| **REPO_I_ROOT** | diting-core 路径（V7 下游验证时必填） |
+| **REPO_I_ROOT** | diting-src 路径（V7 下游验证时必填） |
 
 ## 1. Chart 与版本（V1）
 
@@ -54,8 +54,8 @@ helm upgrade --install postgresql-l2 charts/dependencies/postgresql \
 
 ## 5. 下游连接与 V7
 
-- **配置位置**：diting-core 的 `.env.template` 已注明 `TIMESCALE_DSN`、`REDIS_URL`、`PG_L2_DSN`；复制为 `.env` 后填写与 diting-infra 部署对应的连接串。
-- **验证命令**：在 **diting-core** 根目录执行 `make verify-db-connection`（连接 TimescaleDB，执行 `SELECT 1` 并检查 `ohlcv` 表存在）；退出码 0 表示 V7 通过。
+- **配置位置**：diting-src 的 `.env.template` 已注明 `TIMESCALE_DSN`、`REDIS_URL`、`PG_L2_DSN`；复制为 `.env` 后填写与 diting-infra 部署对应的连接串。
+- **验证命令**：在 **diting-src** 根目录执行 `make verify-db-connection`（连接 TimescaleDB，执行 `SELECT 1` 并检查 `ohlcv` 表存在）；退出码 0 表示 V7 通过。
 
 ## 验证项汇总
 
@@ -67,7 +67,7 @@ helm upgrade --install postgresql-l2 charts/dependencies/postgresql \
 | V4 | PostgreSQL Pod Running；psql $PG_L2_DSN -c 'SELECT 1' 成功 |
 | V5 | Job diting-schema-init 完成；约定表存在且可查 |
 | V6 | Sealed-Secrets 控制器 Running；示例 Secret 可解密 |
-| V7 | 在 diting-core 配置连接并执行 make verify-db-connection，退出码 0 |
+| V7 | 在 diting-src 配置连接并执行 make verify-db-connection，退出码 0 |
 
 全部符合后方可准出，并更新 L5 验收标准（diting-doc `05_成功标识与验证/02_验收标准.md` 锚点 l5-stage-stage2_01）。
 

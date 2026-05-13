@@ -44,11 +44,11 @@ ALICLOUD_SECRET_KEY=你的 AccessKey Secret
 - **修改端口**：改 `stack.databases.*.service.nodePort` 与/或顶层 `ports.*`，并同步 **`redis-values-prod.yaml`**；勿在 Makefile 中写死。
 - **prod.conn**：Up 后由 `scripts/prod-write-conn.sh` 生成，含 `TIMESCALE_DSN`、`PG_L2_DSN`、`REDIS_URL`、`KUBECONFIG`、`PUBLIC_IP`（EIP + 上表 NodePort）。
 
-## 应用侧环境变量（diting-core）
+## 应用侧环境变量（diting-src）
 
-应用连接 L1/L2/Redis 等由 **diting-core** 的 `.env` 控制，**勿在本目录存放 .env**。
+应用连接 L1/L2/Redis 等由 **diting-src** 的 `.env` 控制，**勿在本目录存放 .env**。
 
-- 到 **diting-core** 仓库：`cp .env.template .env`，填写 `TIMESCALE_DSN`、`PG_L2_DSN`、`REDIS_URL` 等（完整键见 diting-core 根目录 `.env.template` 与 README「环境变量」小节）。**远程 K3s** 时 host 为 EIP、端口见上表 NodePort。
+- 到 **diting-src** 仓库：`cp .env.template .env`，填写 `TIMESCALE_DSN`、`PG_L2_DSN`、`REDIS_URL` 等（完整键见 diting-src 根目录 `.env.template` 与 README「环境变量」小节）。**远程 K3s** 时 host 为 EIP、端口见上表 NodePort。
 
 ## Terraform 变量（tfvars）
 

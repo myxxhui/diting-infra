@@ -49,7 +49,7 @@ spec:
           value: {{ if .Values.module_a.runLoop }}"1"{{ else }}"0"{{ end }}
         - name: RUN_LOOP_INTERVAL_SEC
           value: {{ .Values.module_a.runLoopIntervalSec | quote }}
-        - name: DITING_CORE_ROOT
+        - name: DITING_SRC_ROOT
           value: "/app"
         - name: DITING_SYMBOLS
           value: "/config/diting_symbols.txt"

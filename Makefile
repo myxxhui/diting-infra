@@ -58,7 +58,7 @@ stage2-01-full-down: stage2-01-down
 	@echo "[Stage2-01] 完整清理完成（K3s + ECS）"
 
 # ---------- Stage2 本地实践：Docker Compose 提供 L1/L2/Redis（02_三位一体：部署归属 infra）----------
-# 在 diting-infra 执行 up/init 后，在 diting-core 配置 .env 指向 localhost:15432/15433/15479（L1/L2/Redis）并执行 make verify diting prod、ingest-test
+# 在 diting-infra 执行 up/init 后，在 diting-src 配置 .env 指向 localhost:15432/15433/15479（L1/L2/Redis）并执行 make verify diting prod、ingest-test
 # 网络名随 compose 驱动不同可能为 diting-infra_default（docker compose 从本仓根目录 up）或 compose_default（部分 podman-compose）；若 init 报错可覆盖 COMPOSE_NETWORK=compose_default make local-deps-init
 COMPOSE_INGEST = docker compose -f compose/docker-compose.ingest.yaml
 COMPOSE_NETWORK = diting-infra_default
@@ -80,7 +80,7 @@ local-deps-init:
 	@echo "初始化 L2 data_versions 表..."
 	@docker run --rm --network $(COMPOSE_NETWORK) -v "$(LOCAL_SCRIPTS):/scripts" postgres:15-alpine \
 		psql "postgresql://postgres:postgres@l2:5432/diting_l2" -v ON_ERROR_STOP=1 -f /scripts/init_l2_data_versions_local.sql
-	@echo "local-deps-init OK（请在 diting-core 配置 .env：TIMESCALE_DSN、PG_L2_DSN、REDIS_URL=redis://localhost:15479/0 后执行 make verify diting prod、make ingest-test）"
+	@echo "local-deps-init OK（请在 diting-src 配置 .env：TIMESCALE_DSN、PG_L2_DSN、REDIS_URL=redis://localhost:15479/0 后执行 make verify diting prod、make ingest-test）"
 
 # ---------- Stage2-06 生产环境（Up/Down 与 prod.conn 输出）----------
 # 见 04_阶段规划与实践/Stage2_数据采集与存储/06_生产级数据要求_实践.md
@@ -298,7 +298,7 @@ deploy-diting-prod-with-ingest: deploy-diting-prod
 		cp "$(CONN_FILE)" "$$REPO_I_ROOT/.env" && \
 		$(MAKE) -C "$$REPO_I_ROOT" ingest-test && echo "[OK] ingest-test 已执行"; \
 	else \
-		echo "跳过 ingest-test（设置 REPO_I_ROOT 指向 diting-core 可自动执行）"; \
+		echo "跳过 ingest-test（设置 REPO_I_ROOT 指向 diting-src 可自动执行）"; \
 	fi
 
 # 修复 Terraform state（vSwitch 404 + NAS AccessGroup AlreadyExisted 导致「OSS 初始化脚本上传失败」时使用）

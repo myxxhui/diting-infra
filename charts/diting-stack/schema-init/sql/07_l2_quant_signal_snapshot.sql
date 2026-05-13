@@ -1,5 +1,5 @@
 -- L2 PostgreSQL：Module B 量化扫描结果；通过表供 Module C，全量表供查询
--- 与 diting-core/scripts/init_l2_quant_signal_table.py、l2_snapshot_writer 对齐
+-- 与 diting-src/scripts/init_l2_quant_signal_table.py、l2_snapshot_writer 对齐
 -- [Ref: 02_量化扫描引擎_实践, 09_核心模块架构规约, Stage3 规约, 02_B模块策略_策略实现规约 §8]
 
 CREATE TABLE IF NOT EXISTS quant_signal_snapshot (

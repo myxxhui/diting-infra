@@ -1,6 +1,6 @@
 # Stage2 本地实践（无 K3s 时）
 
-> 部署与编排归属 **diting-infra**，与 diting-core 严格区分（见 diting-doc 02_三位一体仓库规约）。  
+> 部署与编排归属 **diting-infra**，与 diting-src 严格区分（见 diting-doc 02_三位一体仓库规约）。  
 > 实践文档（L4）：diting-doc `04_阶段规划与实践/Stage2_数据采集与存储/`。
 
 ## 1. 在 diting-infra 启动本地 L1/L2
@@ -17,11 +17,11 @@ make local-deps-init
   若报错「network not found」：部分环境（如 podman-compose）可能使用不同网络名，可执行  
   `COMPOSE_NETWORK=compose_default make local-deps-init`（以实际网络名为准）。
 
-## 2. 在 diting-core 配置并验证
+## 2. 在 diting-src 配置并验证
 
-在 **diting-core 根目录**：
+在 **diting-src 根目录**：
 
-1. 复制 **diting-core** 的 `.env.template` 为 `.env`，填写必填三项（完整键见 diting-core 根目录 `.env.template`）：
+1. 复制 **diting-src** 的 `.env.template` 为 `.env`，填写必填三项（完整键见 diting-src 根目录 `.env.template`）：
    - `TIMESCALE_DSN=postgresql://postgres:postgres@localhost:15432/postgres`
    - `PG_L2_DSN=postgresql://postgres:postgres@localhost:15433/diting_l2`
    - `REDIS_URL=redis://localhost:15479/0`
@@ -36,8 +36,8 @@ make local-deps-init
 
 ## 3. V-DATA：确认目标数据
 
-执行 diting-core 中约定的 5 条 psql 验证查询，将结果填入 L4 实践文档「目标数据约定与真实结果」表。  
-查询说明与通过标准见 **diting-core**：`docs/ingest-test-target.md`。
+执行 diting-src 中约定的 5 条 psql 验证查询，将结果填入 L4 实践文档「目标数据约定与真实结果」表。  
+查询说明与通过标准见 **diting-src**：`docs/ingest-test-target.md`。
 
 ## 4. 回收本地资源
 
@@ -49,4 +49,4 @@ make local-deps-down
 
 ---
 
-**有 Stage2-01 集群（K3s）时**：在 diting-core 配置 `.env` 指向集群 NodePort 后，直接执行 `make verify-db-connection`、`make ingest-test` 即可；无需本地的 local-deps。
+**有 Stage2-01 集群（K3s）时**：在 diting-src 配置 `.env` 指向集群 NodePort 后，直接执行 `make verify-db-connection`、`make ingest-test` 即可；无需本地的 local-deps。
