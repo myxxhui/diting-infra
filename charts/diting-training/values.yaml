@@ -1,0 +1,54 @@
+# diting-training values（占位 · P-step_04 时按需补全）
+# [Ref: 03_原子目标与规约/共享平台基础/stages/stage_1_启动期/01_平台拓扑设计.md §2]
+
+training:
+  # 维度：cryo | thrust | narrative
+  dim: cryo
+  # 训练步数（启动期 sanity = 100；正式 = 500-2000）
+  maxSteps: 500
+  # 训练数据 NAS 路径
+  dataPath: /mnt/titan-data/lora/data/{{ .Values.training.dim }}
+  # 权重输出 NAS 路径
+  outputPath: /mnt/titan-data/lora/{{ .Values.training.dim }}
+
+image:
+  repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-llama-factory
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: acr-titan
+
+# nodeSelector 绑 train stack（仅在 train ECS 调度）
+nodeSelector:
+  stack.diting/node: train
+  nvidia.com/gpu: present
+
+tolerations:
+  - key: stack.diting/node
+    operator: Equal
+    value: train
+    effect: NoSchedule
+
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    memory: 14Gi
+  requests:
+    nvidia.com/gpu: 1
+    memory: 8Gi
+
+# 训练超参（启动期默认 · 各 dim 可在 helm --set 覆盖）
+hyperparams:
+  loraRank: 16
+  loraAlpha: 32
+  learningRate: 1e-4
+  perDeviceTrainBatchSize: 2
+  gradientAccumulationSteps: 4
+  warmupSteps: 20
+  saveSteps: 50
+
+# Secret（HF_TOKEN / WandB API · 启动期 P-step_04 注入）
+secrets:
+  hfToken: ""
+  wandbApiKey: ""

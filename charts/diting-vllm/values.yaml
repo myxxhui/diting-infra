@@ -1,0 +1,51 @@
+# diting-vllm values（占位 · P-step_05 时按需补全）
+# [Ref: 03_原子目标与规约/共享平台基础/stages/stage_1_启动期/01_平台拓扑设计.md §2]
+
+vllm:
+  baseModel: Qwen/Qwen2.5-7B-Instruct
+  # 启动时载入的 LoRA adapter 路径（NAS · 多 dim 通过 --enable-lora 热切换）
+  loraModulesPath: /mnt/titan-data/lora
+  loraModules:
+    - cryo
+    - thrust
+    - narrative
+  # 推理参数
+  maxModelLen: 4096
+  gpuMemoryUtilization: 0.90
+  enableLora: true
+  maxLoras: 4
+
+image:
+  repository: vllm/vllm-openai
+  tag: v0.6.6
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: acr-titan
+
+# nodeSelector 绑 infer stack
+nodeSelector:
+  stack.diting/node: infer
+  nvidia.com/gpu: present
+
+tolerations:
+  - key: stack.diting/node
+    operator: Equal
+    value: infer
+    effect: NoSchedule
+
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    memory: 14Gi
+  requests:
+    nvidia.com/gpu: 1
+    memory: 10Gi
+
+service:
+  type: ClusterIP
+  port: 8000
+
+replicas: 1
+
+# Holdout client（D5 step_05）通过 Service DNS 访问：http://diting-infer.infer.svc.cluster.local:8000/v1

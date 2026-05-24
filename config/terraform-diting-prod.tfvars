@@ -3,7 +3,7 @@
 env_id            = "prod"
 region            = "cn-hongkong"
 instance_type     = "ecs.u1-c1m4.xlarge"
-instance_password = "Hui123123!!"
+# instance_password 由 diting-infra/.env 的 TF_VAR_instance_password 注入（勿在此写明文）
 vpc_cidr          = "10.0.0.0/16"
 vswitch_cidr      = "10.0.1.0/24"
 enable_spot       = true
@@ -34,3 +34,50 @@ data_disk_category    = "cloud_essd"
 oss_bucket_name = "deploy-engine-k3s-storage"
 oss_bucket_acl  = "public-read-write"
 init_script_acl = "public-read"
+
+# ============================================================================
+# v2 多 stack（P 轨）— 启动期默认仅 base，count=1；train/infer count=0（按需起停）
+# make up-stack diting prod STACK=train 时改为 1（或经 TF_VAR_stacks 覆盖）
+# 注：本 stacks 配置覆盖根级 main.tf 的 legacy_base_stack 合成路径
+# ============================================================================
+stacks = {
+  base = {
+    instance_type        = "ecs.u1-c1m4.xlarge"
+    spot_strategy        = "SpotAsPriceGo"
+    spot_price_limit     = 0.6
+    image_family         = "ubuntu_22_04"
+    system_disk_gb       = 60
+    system_disk_category = "cloud_essd"
+    attach_data_disk     = true
+    k3s_role             = "server"
+    node_labels          = { "stack.diting/node" = "base" }
+    enable_eip           = true
+    count                = 1
+  }
+  train = {
+    instance_type        = "ecs.gn6i-c4g1.xlarge"
+    spot_strategy        = "SpotAsPriceGo"
+    spot_price_limit     = 3.0
+    image_family         = "ubuntu_22_04_gpu"
+    system_disk_gb       = 100
+    system_disk_category = "cloud_essd"
+    attach_data_disk     = false
+    k3s_role             = "agent"
+    node_labels          = { "stack.diting/node" = "train", "nvidia.com/gpu" = "present" }
+    enable_eip           = false
+    count                = 0
+  }
+  infer = {
+    instance_type        = "ecs.gn6i-c4g1.xlarge"
+    spot_strategy        = "SpotAsPriceGo"
+    spot_price_limit     = 3.0
+    image_family         = "ubuntu_22_04_gpu"
+    system_disk_gb       = 100
+    system_disk_category = "cloud_essd"
+    attach_data_disk     = false
+    k3s_role             = "agent"
+    node_labels          = { "stack.diting/node" = "infer", "nvidia.com/gpu" = "present" }
+    enable_eip           = false
+    count                = 0
+  }
+}

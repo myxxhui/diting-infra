@@ -1,0 +1,57 @@
+# diting-platform-base values（占位 · P-step_03 时按需补全）
+# [Ref: 03_原子目标与规约/共享平台基础/stages/stage_1_启动期/01_平台拓扑设计.md §2]
+
+namespaces:
+  platform:
+    enabled: true
+    labels:
+      stack.diting/layer: l1-cpu
+  train:
+    enabled: true
+    labels:
+      stack.diting/layer: l2-gpu-train
+  infer:
+    enabled: true
+    labels:
+      stack.diting/layer: l3-gpu-infer
+
+# ACR pull secret 复制到 platform / train / infer 三 ns
+# 凭证由 charts/diting-stack/manifests/acr-pull-secret.yaml 的 .dockerconfigjson 提供
+# 此处仅引用名字 · helm install 时通过 --set acrPullSecret.dockerconfigjson=<base64> 注入
+acrPullSecret:
+  name: acr-titan
+  # 在 namespace 列表中复制
+  copyToNamespaces: [platform, train, infer]
+  # base64 编码的 .dockerconfigjson；启动期可读 charts/diting-stack/manifests/acr-pull-secret.yaml 取值
+  dockerconfigjson: ""
+
+# NVIDIA device plugin（v0.17 stable · 对应 K8s 1.28+）
+nvidiaDevicePlugin:
+  enabled: true
+  image:
+    repository: nvcr.io/nvidia/k8s-device-plugin
+    tag: v0.17.0
+  # 仅 GPU 节点：nodeSelector + toleration
+  nodeSelector:
+    nvidia.com/gpu: present
+  tolerations:
+    - key: stack.diting/node
+      operator: Equal
+      value: train
+      effect: NoSchedule
+    - key: stack.diting/node
+      operator: Equal
+      value: infer
+      effect: NoSchedule
+
+# nvidia RuntimeClass（K8s 1.20+ · 由 containerd 1.5+ 支持）
+nvidiaRuntimeClass:
+  enabled: true
+  name: nvidia
+
+# StorageClass：NAS subPath provisioner（NAS 挂载点已由 user-data.sh 挂载到 /mnt/titan-data）
+# 启动期不强制；P-step_03 业务 chart 可直接用 hostPath PV（与现有 diting-stack 一致）
+storageclassNas:
+  enabled: false
+  name: titan-nas
+  provisioner: kubernetes.io/no-provisioner

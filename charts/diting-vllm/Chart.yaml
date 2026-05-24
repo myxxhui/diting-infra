@@ -1,0 +1,14 @@
+apiVersion: v2
+name: diting-vllm
+description: |
+  L3 GPU 推理 chart（v2 · 长服务态 · 评测周期常驻 · 多 dim 连跑共用节点）：
+    - vLLM Deployment（base model + LoRA adapter hot-swap）
+    - Service（ClusterIP · 内部 holdout 访问）
+    - ConfigMap（vLLM 启动参数 · model path / adapter path）
+    - PVC（NAS subPath /lora/<dim>/ readonly）
+
+  生命周期：评测期 helm install 一次 · 多 dim Holdout 连跑共享 GPU · 结束 make down-stack diting-vllm。
+  详见 diting-doc/03_原子目标与规约/共享平台基础/.../01_平台拓扑设计.md §2
+type: application
+version: 0.1.0
+appVersion: "1.0"

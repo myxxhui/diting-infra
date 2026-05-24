@@ -1,0 +1,14 @@
+apiVersion: v2
+name: diting-training
+description: |
+  L2 GPU 训练 chart（v2 · 任务态 · 可并行多 dim release）：
+    - LoRA 训练 Job（per-dim · helm install diting-train-cryo / -thrust / -narrative）
+    - ConfigMap（训练超参 · 配置驱动）
+    - Secret（HF_TOKEN / S3 凭证等）
+    - PVC（NAS subPath /lora/<dim>/）
+
+  生命周期：一次性 Job · 跑完即销；nodeSelector 绑 train stack。
+  详见 diting-doc/03_原子目标与规约/共享平台基础/.../01_平台拓扑设计.md §2
+type: application
+version: 0.1.0
+appVersion: "1.0"

@@ -375,3 +375,80 @@ down-diting-prod:
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@echo "make down diting prod OK（ECS/EIP 已回收；数据盘已保留，再次执行 make deploy diting prod 将挂载同盘）"
+
+# ============================================================================
+# v2 多 stack（P 轨）— diting-infra 壳调 deploy-engine 新 target
+# ============================================================================
+# 用法：make up-stack <chart-name> · make down-stack <chart-name>
+# chart-name ↔ stack_id 映射：
+#   diting-stack    → base
+#   diting-training → train
+#   diting-vllm     → infer
+# 详见 03_/共享平台基础/.../02_deploy-engine扩展规约.md §3
+# ============================================================================
+
+# chart_name → stack_id / namespace 映射在 recipe 内用 shell case 完成
+# 不在 Make 层定义 $(if ...) 宏（避免 line 16 export 触发 $(error) 副作用）
+
+# 占位 target：捕获 "diting-stack" / "diting-training" / "diting-vllm" 作为参数而非 file target
+.PHONY: diting-stack diting-training diting-vllm up-stack down-stack down-platform-base down-all platform-status
+diting-stack diting-training diting-vllm:
+	@true
+
+up-stack: update-deploy-engine
+	@_chart=$(word 2,$(MAKECMDGOALS)); \
+	if [ -z "$$_chart" ]; then \
+		echo "用法: make up-stack <chart-name>"; \
+		echo "  chart-name ∈ {diting-stack, diting-training, diting-vllm}"; exit 1; \
+	fi; \
+	case "$$_chart" in \
+	  diting-stack)    _stack=base ;; \
+	  diting-training) _stack=train ;; \
+	  diting-vllm)     _stack=infer ;; \
+	  *) echo "未知 chart: $$_chart · 支持: diting-stack/diting-training/diting-vllm"; exit 1 ;; \
+	esac; \
+	echo "[up-stack] chart=$$_chart → stack=$$_stack"; \
+	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack
+
+down-stack: update-deploy-engine
+	@_chart=$(word 2,$(MAKECMDGOALS)); \
+	if [ -z "$$_chart" ]; then \
+		echo "用法: make down-stack <chart-name>"; exit 1; \
+	fi; \
+	case "$$_chart" in \
+	  diting-stack)    _stack=base; _ns=platform ;; \
+	  diting-training) _stack=train; _ns=train ;; \
+	  diting-vllm)     _stack=infer; _ns=infer ;; \
+	  *) echo "未知 chart: $$_chart"; exit 1 ;; \
+	esac; \
+	echo "[down-stack] chart=$$_chart → stack=$$_stack ns=$$_ns"; \
+	_kubecfg="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	if [ -f "$$_kubecfg" ]; then \
+		KUBECONFIG="$$_kubecfg" helm uninstall $$_chart -n $$_ns 2>/dev/null || true; \
+		if [ "$$_chart" = "diting-training" ]; then \
+			for r in $$(KUBECONFIG="$$_kubecfg" helm list -n train -q 2>/dev/null | grep '^diting-train-'); do \
+				KUBECONFIG="$$_kubecfg" helm uninstall $$r -n train; \
+			done; \
+		fi; \
+	else \
+		echo "（kubeconfig 不存在，跳过 helm uninstall）"; \
+	fi; \
+	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack
+
+down-platform-base: update-deploy-engine
+	@echo "[down-platform-base] 销所有 ECS+EIP + 集群级 K8s · 保留永驻 10 项"
+	@if [ -f "$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)" ]; then \
+		KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)" \
+			helm uninstall diting-platform-base -n kube-system 2>/dev/null || true; \
+	fi
+	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-platform-base $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+down-all:
+	@if [ "$(FULL_DESTROY)" != "1" ]; then \
+		echo "错误: tier-3 完全销毁需 FULL_DESTROY=1"; \
+		echo "用法: make down-all FULL_DESTROY=1"; exit 1; \
+	fi
+	@CONFIG_ROOT="$(CONFIG_ROOT)" FULL_DESTROY=1 $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-all $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+platform-status:
+	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) platform-status $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: diting-platform-base
+description: |
+  L0 集群级基础设施 chart（v2 · 一次装 · 长期不动）：
+    - 创建 platform / train / infer 三 namespace
+    - 复制 ACR pull secret（acr-titan）到三 ns
+    - nvidia-device-plugin DaemonSet（仅 GPU 节点 · nodeSelector + toleration）
+    - nvidia RuntimeClass
+    - storageclass-nas（NAS subPath provisioner）
+
+  生命周期：cluster-scoped 资源；helm uninstall 由 `make down-platform-base` 触发。
+  详见 diting-doc/03_原子目标与规约/共享平台基础/.../01_平台拓扑设计.md §2
+type: application
+version: 0.1.0
+appVersion: "1.0"
