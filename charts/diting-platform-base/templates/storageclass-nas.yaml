@@ -1,0 +1,14 @@
+# StorageClass：NAS（可选，启动期默认 disabled）
+# [Ref: 03_原子目标与规约/共享平台基础/stages/stage_1_启动期/step_03 §1 P4]
+{{- if .Values.storageclassNas.enabled }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageclassNas.name }}
+  labels:
+    {{- include "diting-platform-base.labels" . | nindent 4 }}
+provisioner: {{ .Values.storageclassNas.provisioner }}
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+{{- end }}

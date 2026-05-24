@@ -1,0 +1,48 @@
+# NVIDIA Device Plugin DaemonSet（GPU 节点专用）
+# [Ref: 03_原子目标与规约/共享平台基础/stages/stage_1_启动期/step_03 §1 P3]
+# 启动期 CPU-only 集群时 DaemonSet 0 实例正常，GPU 节点加入后自动扩展
+{{- if .Values.nvidiaDevicePlugin.enabled }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+  labels:
+    {{- include "diting-platform-base.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      tolerations:
+        {{- toYaml .Values.nvidiaDevicePlugin.tolerations | nindent 8 }}
+      priorityClassName: "system-node-critical"
+      containers:
+        - image: "{{ .Values.nvidiaDevicePlugin.image.repository }}:{{ .Values.nvidiaDevicePlugin.image.tag }}"
+          name: nvidia-device-plugin-ctr
+          env:
+            - name: FAIL_ON_INIT_ERROR
+              value: "false"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+      {{- if .Values.nvidiaDevicePlugin.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.nvidiaDevicePlugin.nodeSelector | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+{{- end }}

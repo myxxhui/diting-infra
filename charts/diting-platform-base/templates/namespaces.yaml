@@ -1,0 +1,16 @@
+# 集群级三 namespace：platform（业务）/ train（GPU 训练）/ infer（GPU 推理）
+# [Ref: 03_原子目标与规约/共享平台基础/stages/stage_1_启动期/step_03 §1 P1]
+{{- range $ns, $cfg := .Values.namespaces }}
+{{- if $cfg.enabled }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "diting-platform-base.labels" $ | nindent 4 }}
+    {{- range $k, $v := $cfg.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+{{- end }}
+{{- end }}
