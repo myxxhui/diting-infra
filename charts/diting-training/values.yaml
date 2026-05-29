@@ -4,20 +4,26 @@
 training:
   # 维度：cryo | thrust | narrative
   dim: cryo
+  # LLaMA-Factory dataset 前缀（空则按 dim 自动映射）
+  taskByDim:
+    cryo: financial_fraud
+    thrust: shareholder
+    narrative: related_party
   # 训练步数（启动期 sanity = 100；正式 = 500-2000）
-  maxSteps: 500
+  maxSteps: 100
   # 训练数据 NAS 路径
   dataPath: /mnt/titan-data/lora/data/{{ .Values.training.dim }}
   # 权重输出 NAS 路径
   outputPath: /mnt/titan-data/lora/{{ .Values.training.dim }}
 
 image:
-  repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-llama-factory
+  # 方案A：train 节点本地 import（hiyouga/llamafactory，从 NAS tar 导入）
+  repository: docker.io/hiyouga/llamafactory
   tag: latest
-  pullPolicy: IfNotPresent
+  # Never = 只用本地已 import 的镜像，不尝试公网拉取
+  pullPolicy: Never
 
-imagePullSecrets:
-  - name: acr-titan
+imagePullSecrets: []
 
 # nodeSelector 绑 train stack（仅在 train ECS 调度）
 nodeSelector:

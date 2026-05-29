@@ -13,9 +13,9 @@ global:
 
 # deploy-engine 用：不在此处部署数据库，由 deploy-stack.sh 用官方 Chart 部署
 deploy_control:
-  enable_timescaledb: false
-  enable_postgres_l2: false
-  enable_redis: false
+  enable_timescaledb: true
+  enable_postgres_l2: true
+  enable_redis: true
   k3s_storage_plugin: "local-path"
 
 # Diting Stack：1) 静态存储 Chart  2) 数据库由脚本用官方 Chart 部署
@@ -23,7 +23,7 @@ stack:
   enabled: true
   chart_path: "charts/diting-stack"
   release_name: "diting-stack"
-  namespace: "default"
+  namespace: "platform"
 
   # 仅静态 PV/PVC + 初始化 Job（与 diting-stack Chart values 同构）
   storage:
@@ -37,7 +37,7 @@ stack:
         reclaimPolicy: Retain
       pvc:
         name: data-timescaledb-postgresql-0
-        namespace: default
+        namespace: platform
         accessMode: ReadWriteOnce
         storageRequest: 50Gi
     postgresL2:
@@ -49,7 +49,7 @@ stack:
         reclaimPolicy: Retain
       pvc:
         name: data-postgresql-l2-0
-        namespace: default
+        namespace: platform
         accessMode: ReadWriteOnce
         storageRequest: 20Gi
 

@@ -11,7 +11,12 @@ PROJECT="${4:-diting}"
 ENV="${5:-prod}"
 
 ENGINE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TF_DIR="${ENGINE_ROOT}/${DEPLOY_ENGINE_DIR}/deploy/terraform/alicloud"
+if [ -d "$DEPLOY_ENGINE_DIR" ]; then
+  DE_ROOT="$(cd "$DEPLOY_ENGINE_DIR" && pwd)"
+else
+  DE_ROOT="${ENGINE_ROOT}/${DEPLOY_ENGINE_DIR}"
+fi
+TF_DIR="${DE_ROOT}/deploy/terraform/alicloud"
 STATE_FILE="${ENGINE_ROOT}/${DEPLOY_ENGINE_DIR}/.deploy/state-${PROJECT}-${ENV}.json"
 KUBECONFIG_PATH="${HOME}/.kube/config-${PROJECT}-${ENV}"
 
@@ -63,3 +68,34 @@ KUBECONFIG=${KUBECONFIG_PATH}
 PUBLIC_IP=${PUBLIC_IP}
 EOF
 echo "[OK] $CONN_FILE 已写入"
+
+# ── 下游仓库 .env 同步（仅替换已用 prod 模式的 .env，不动本地 Compose 配置）──
+# 判定规则：下游 .env 若已含 `PUBLIC_IP=` 行（说明历史上是 prod 模式），则覆盖 5 行；
+# 否则跳过（保留本地 Compose / 用户手工配置）。永远不动 API_KEY、SIGNAL_LAYER_* 等密钥行。
+# 触发：make deploy diting prod 末尾；EIP 漂移或重建 base 后下游自动跟齐。
+sync_downstream_env() {
+  local env_file="$1"
+  [ -f "$env_file" ] || return 0
+  if ! grep -q '^PUBLIC_IP=' "$env_file" 2>/dev/null; then
+    echo "[SKIP] $env_file 非 prod 模式（无 PUBLIC_IP=），跳过同步"
+    return 0
+  fi
+  # 用 awk 仅替换 5 个 key 行，其他行原样保留
+  local tmp; tmp="$(mktemp)"
+  awk -v ip="$PUBLIC_IP" -v p1="$NODEPORT_L1" -v p2="$NODEPORT_L2" -v pr="$NODEPORT_REDIS" -v kc="$KUBECONFIG_PATH" '
+    /^TIMESCALE_DSN=/ { print "TIMESCALE_DSN=postgresql://postgres:postgres@" ip ":" p1 "/postgres"; next }
+    /^PG_L2_DSN=/     { print "PG_L2_DSN=postgresql://postgres:postgres@" ip ":" p2 "/diting_l2"; next }
+    /^REDIS_URL=/     { print "REDIS_URL=redis://" ip ":" pr "/0"; next }
+    /^KUBECONFIG=/    { print "KUBECONFIG=" kc; next }
+    /^PUBLIC_IP=/     { print "PUBLIC_IP=" ip; next }
+    { print }
+  ' "$env_file" > "$tmp" && mv "$tmp" "$env_file"
+  echo "[OK] 同步下游 .env → $env_file (PUBLIC_IP=$PUBLIC_IP)"
+}
+
+# 下游仓库相对路径（与 diting-infra 平级）
+DOWNSTREAM_REPOS="${DOWNSTREAM_REPOS:-diting-core diting-src}"
+WORKSPACE_ROOT="$(cd "$ENGINE_ROOT/.." && pwd)"
+for repo in $DOWNSTREAM_REPOS; do
+  sync_downstream_env "$WORKSPACE_ROOT/$repo/.env"
+done

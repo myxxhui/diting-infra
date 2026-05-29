@@ -149,90 +149,10 @@ deploy-diting-prod: update-deploy-engine
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@echo ""
 	@echo "=========================================="
-	@echo "  部署 Diting Stack（静态 PV/PVC）"
+	@echo "  部署 Platform Stack（P-step_03 · platform-base + diting-stack + DB）"
 	@echo "=========================================="
-	@command -v yq >/dev/null 2>&1 || { echo "错误: 未找到 yq，无法解析 $(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml，PG/Redis/TimescaleDB 等将无法部署。请安装后重试: apt install yq 或 pip install yq 或 https://github.com/mikefarah/yq#install"; exit 1; }; \
-	export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
-	STACK_ENABLED=$$(yq eval '.stack.enabled // true' "$$CFG"); \
-	if [ "$$STACK_ENABLED" = "true" ]; then \
-		TMP=$$(mktemp); \
-		yq eval '{"storage": .stack.storage}' "$$CFG" > "$$TMP"; \
-		if helm list -n default | grep -q diting-stack; then \
-			helm upgrade diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
-		else \
-			helm install diting-stack $(CURDIR)/charts/diting-stack -n default -f "$$TMP" --wait --timeout=5m; \
-		fi; \
-		rm -f "$$TMP"; \
-		echo "✅ Diting Stack（存储）部署完成"; \
-	fi
-	@echo ""
-	@echo "=========================================="
-	@echo "  部署数据库（官方 Bitnami Chart）"
-	@echo "=========================================="
-	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	CFG="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"; \
-	REDIS_VAL="$(CONFIG_ROOT)/redis-values-prod.yaml"; \
-	helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true; \
-	helm repo update bitnami; \
-	PORT_L1=$$(yq eval '(.stack.databases.timescaledb.service.nodePort // .ports.timescaledb) // 30432' "$$CFG" 2>/dev/null || echo 30432); \
-	PORT_L2=$$(yq eval '(.stack.databases.postgres_l2.service.nodePort // .ports.postgres_l2) // 30433' "$$CFG" 2>/dev/null || echo 30433); \
-	if [ -f "$$REDIS_VAL" ]; then \
-	  PORT_REDIS=$$(yq eval '.master.service.nodePorts.redis // "30379"' "$$REDIS_VAL" 2>/dev/null || echo 30379); \
-	else \
-	  PORT_REDIS=$$(yq eval '.ports.redis // 30379' "$$CFG" 2>/dev/null || echo 30379); \
-	fi; \
-	if [ "$$(yq eval '.deploy_control.enable_timescaledb // false' "$$CFG")" = "true" ]; then \
-		echo "部署 TimescaleDB (NodePort $$PORT_L1)..."; \
-		helm upgrade --install timescaledb bitnami/postgresql -n default \
-			--set auth.username=$$(yq eval '.stack.databases.timescaledb.auth.username // "postgres"' "$$CFG") \
-			--set auth.password=$$(yq eval '.stack.databases.timescaledb.auth.password // "postgres"' "$$CFG") \
-			--set auth.database=$$(yq eval '.stack.databases.timescaledb.auth.database // "postgres"' "$$CFG") \
-			--set primary.persistence.enabled=true \
-			--set primary.persistence.existingClaim=$$(yq eval '.stack.databases.timescaledb.persistence.existing_claim // "data-timescaledb-postgresql-0"' "$$CFG") \
-			--set primary.service.type=NodePort \
-			--set primary.service.nodePorts.postgresql=$$PORT_L1 \
-			--wait --timeout=5m; \
-		echo "✅ TimescaleDB 完成"; \
-	fi; \
-	if [ "$$(yq eval '.deploy_control.enable_postgres_l2 // false' "$$CFG")" = "true" ]; then \
-		echo "部署 PostgreSQL L2 (NodePort $$PORT_L2)..."; \
-		helm upgrade --install postgresql-l2 bitnami/postgresql -n default \
-			--set auth.username=$$(yq eval '.stack.databases.postgres_l2.auth.username // "postgres"' "$$CFG") \
-			--set auth.password=$$(yq eval '.stack.databases.postgres_l2.auth.password // "postgres"' "$$CFG") \
-			--set auth.database=$$(yq eval '.stack.databases.postgres_l2.auth.database // "diting_l2"' "$$CFG") \
-			--set primary.persistence.enabled=true \
-			--set primary.persistence.existingClaim=$$(yq eval '.stack.databases.postgres_l2.persistence.existing_claim // "data-postgresql-l2-0"' "$$CFG") \
-			--set primary.service.type=NodePort \
-			--set primary.service.nodePorts.postgresql=$$PORT_L2 \
-			--wait --timeout=5m; \
-		echo "✅ PostgreSQL L2 完成"; \
-	fi; \
-	if [ "$$(yq eval '.deploy_control.enable_redis // false' "$$CFG")" = "true" ]; then \
-		echo "部署 Redis (NodePort $$PORT_REDIS)..."; \
-		REDIS_CLAIM=$$(yq eval '.stack.databases.redis.persistence.existing_claim // ""' "$$CFG"); \
-		if [ -n "$$REDIS_CLAIM" ]; then \
-			helm upgrade --install redis bitnami/redis -n default \
-				--set auth.enabled=$$(yq eval '.stack.databases.redis.auth_enabled // false' "$$CFG") \
-				--set master.persistence.enabled=true \
-				--set master.persistence.existingClaim=$$REDIS_CLAIM \
-				--set master.service.type=NodePort \
-				--set master.service.nodePorts.redis=$$PORT_REDIS \
-				--set volumePermissions.enabled=true \
-				--wait --timeout=5m; \
-		else \
-			helm upgrade --install redis bitnami/redis -n default \
-				--set auth.enabled=$$(yq eval '.stack.databases.redis.auth_enabled // false' "$$CFG") \
-				--set master.persistence.enabled=true \
-				--set master.persistence.size=$$(yq eval '.stack.databases.redis.persistence.size // "10Gi"' "$$CFG") \
-				--set master.persistence.storageClass=$$(yq eval '.stack.databases.redis.persistence.storage_class // "local-path"' "$$CFG") \
-				--set master.service.type=NodePort \
-				--set master.service.nodePorts.redis=$$PORT_REDIS \
-				--set volumePermissions.enabled=true \
-				--wait --timeout=5m; \
-		fi; \
-		echo "✅ Redis 完成"; \
-	fi
+	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
+		CONN_FILE="$(CONN_FILE)" bash "$(CURDIR)/scripts/platform-step03-deploy-stack.sh"
 	@$(MAKE) -f $(CURDIR)/Makefile prod-write-conn
 	@echo ""
 	@echo "=========================================="
@@ -240,7 +160,9 @@ deploy-diting-prod: update-deploy-engine
 	@echo "=========================================="
 	@INGEST_ENABLED=$$(yq eval '.data_ingestion.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	USE_K3S_JOB=$$(yq eval '.data_ingestion.use_k3s_job // true' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-	if [ "$$INGEST_ENABLED" = "true" ]; then \
+	if [ "$${SKIP_INGEST:-0}" = "1" ]; then \
+		echo "SKIP_INGEST=1，跳过数据采集（persist / smoke 场景）"; \
+	elif [ "$$INGEST_ENABLED" = "true" ]; then \
 		if [ "$$USE_K3S_JOB" = "true" ]; then \
 			$(MAKE) deploy-ingest-job WAIT=wait; \
 		else \
@@ -275,14 +197,9 @@ prod-write-conn:
 # 将 prod.conn 同步为 K8s Secret diting-db-connection（供 schema-init hook 与 ingest Job 使用）
 # Job 在集群内运行，须使用集群内 Service 地址；prod.conn 仍为公网 NodePort 供本机 verify 使用
 prod-sync-conn-secret:
-	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	[ -f "$(CONN_FILE)" ] || { echo "错误: $(CONN_FILE) 不存在，请先 make deploy diting prod 或 make prod-write-conn"; exit 1; }; \
-	echo "同步 Secret diting-db-connection（集群内 DSN，供 Job 使用）..."; \
-	_TMP=$$(mktemp); grep -E '^(TIMESCALE_DSN|PG_L2_DSN|REDIS_URL)=' "$(CONN_FILE)" > "$$_TMP"; \
-	sed -i.bak -e 's|\(TIMESCALE_DSN=postgresql://[^@]*@\)[^/]*|\1timescaledb-postgresql.default.svc:5432|' \
-		-e 's|\(PG_L2_DSN=postgresql://[^@]*@\)[^/]*|\1postgresql-l2.default.svc:5432|' \
-		-e 's|\(REDIS_URL=redis://\)[^/]*|\1redis-master.default.svc:6379|' "$$_TMP"; \
-	kubectl create secret generic diting-db-connection --from-env-file="$$_TMP" -n default --dry-run=client -o yaml | kubectl apply -f -; rm -f "$$_TMP" "$$_TMP.bak"
+	@STACK_NS=$$(yq eval '.stack.namespace // "platform"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml" 2>/dev/null || echo platform); \
+	export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	STACK_NS="$$STACK_NS" scripts/prod-sync-conn-secret.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
 # 在远程 K3s 部署并运行采集 Job（charts/ingest 含 pre-install hook 自动执行 schema-init；Secret 由 prod-sync-conn-secret 提供）
 # 用法: make deploy-ingest-job [WAIT=wait] [INGEST_TARGET=ingest-test-real|ingest-production]
@@ -408,7 +325,12 @@ up-stack: update-deploy-engine
 	  *) echo "未知 chart: $$_chart · 支持: diting-stack/diting-training/diting-vllm"; exit 1 ;; \
 	esac; \
 	echo "[up-stack] chart=$$_chart → stack=$$_stack"; \
-	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack
+	if [ -f "$(DISK_ID_FILE)" ]; then \
+		export TF_VAR_use_existing_data_disk_id=$$(cat "$(DISK_ID_FILE)"); \
+		echo "[up-stack] 复用数据盘 TF_VAR_use_existing_data_disk_id=$$TF_VAR_use_existing_data_disk_id"; \
+	fi; \
+	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; \
+	bash scripts/eip-association-guard.sh "$$_stack" || echo "[up-stack] ⚠️ EIP 守门返回非 0，请检查 (不阻塞)"
 
 down-stack: update-deploy-engine
 	@_chart=$(word 2,$(MAKECMDGOALS)); \
@@ -452,3 +374,155 @@ down-all:
 
 platform-status:
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) platform-status $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+# ─── P-step_03 Makefile 合约（L3 §7.2）────────────────────────────────────
+.PHONY: platform-step03-prep platform-step03-up platform-step03-smoke platform-step03-test-persist platform-step03-all
+
+platform-step03-prep:
+	@command -v yq >/dev/null || { echo "❌ 需要 yq"; exit 1; }; \
+	command -v helm >/dev/null || { echo "❌ 需要 helm"; exit 1; }; \
+	command -v kubectl >/dev/null || { echo "❌ 需要 kubectl"; exit 1; }; \
+	if command -v psql >/dev/null 2>&1 || [ -x /opt/homebrew/opt/libpq/bin/psql ]; then \
+	  echo "✅ psql 可用（S6/B1）"; \
+	else \
+	  echo "⚠️  无 psql · S6/B1 将跳过（macOS: brew install libpq && export PATH=/opt/homebrew/opt/libpq/bin:\$$PATH）"; \
+	fi; \
+	echo "✅ [platform-step03-prep] 工具链就绪"
+
+platform-step03-up: platform-step03-prep
+	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
+		CONN_FILE="$(CONN_FILE)" bash scripts/platform-step03-deploy-stack.sh
+
+platform-step03-smoke: platform-step03-prep
+	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
+		CONN_FILE="$(CONN_FILE)" bash scripts/platform-step03-smoke.sh
+
+platform-step03-test-persist: platform-step03-prep
+	@ROUNDS=$${ROUNDS:-3} CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
+		CONN_FILE="$(CONN_FILE)" bash scripts/test-data-persistence.sh
+
+platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-test-persist
+	@echo "✅ [platform-step03-all] up + smoke + persist 完成"
+
+# P-step_04 · Spot 无库存时定时重试 up-stack diting-training（默认 2h 一次）
+.PHONY: retry-up-stack-training retry-up-stack-training-once retry-up-stack-training-status retry-up-stack-training-stop
+retry-up-stack-training:
+	@bash scripts/retry-up-stack-training.sh
+
+retry-up-stack-training-once:
+	@RETRY_ONCE=1 bash scripts/retry-up-stack-training.sh
+
+retry-up-stack-training-status:
+	@if [ -f logs/retry-up-stack-training.state ]; then cat logs/retry-up-stack-training.state; else echo "（无 state 文件 · 重试循环未运行或未启动）"; fi
+	@if [ -f logs/retry-up-stack-training.pid ] && kill -0 "$$(cat logs/retry-up-stack-training.pid)" 2>/dev/null; then echo "pid=$$(cat logs/retry-up-stack-training.pid) running=1"; else echo "running=0"; fi
+	@if [ -f logs/retry-up-stack-training.log ]; then echo "--- tail log ---"; tail -5 logs/retry-up-stack-training.log; fi
+
+retry-up-stack-training-stop:
+	@if [ -f logs/retry-up-stack-training.pid ]; then \
+		pid=$$(cat logs/retry-up-stack-training.pid); \
+		if kill -0 "$$pid" 2>/dev/null; then kill "$$pid" && echo "已停止 retry 循环 pid=$$pid"; else echo "pid=$$pid 已不在运行"; fi; \
+		rm -f logs/retry-up-stack-training.pid; \
+	else echo "无 pid 文件"; fi
+
+# ===========================================================================
+# D5 P-step_04 GPU 训练 targets（W5）
+# [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_04_C3_LLaMA_Factory训练流水线.md §7.2]
+# ===========================================================================
+TRAIN_NS        ?= train
+TRAIN_MAX_STEPS ?= 500
+TRAIN_IMAGE_TAG ?= latest
+KUBECONFIG      ?= $(HOME)/.kube/config-diting-prod
+
+.PHONY: evo-step04-prep evo-step04-train-cryo evo-step04-train-thrust evo-step04-train-narrative \
+        evo-step04-status evo-step04-clean evo-step04-all
+
+evo-step04-prep:
+	@echo "[evo-step04-prep] 检查 GPU 节点与 NAS..."
+	@KUBECONFIG=$(KUBECONFIG) kubectl get node -l nvidia.com/gpu=present 2>&1 | grep -q "Ready" \
+		&& echo "✅ GPU 节点 Ready" \
+		|| { echo "❌ 无 Ready GPU 节点，请先 make up-stack diting-training"; exit 1; }
+	@KUBECONFIG=$(KUBECONFIG) kubectl get ns $(TRAIN_NS) 2>/dev/null || \
+		KUBECONFIG=$(KUBECONFIG) kubectl create ns $(TRAIN_NS)
+	@echo "✅ [evo-step04-prep] 就绪"
+
+# 各维度训练 Job（helm install · 幂等：同 release 已存在则 upgrade）
+evo-step04-train-cryo: evo-step04-prep
+	@echo "[evo-step04-train-cryo] 安装训练 Job dim=cryo maxSteps=$(TRAIN_MAX_STEPS)"
+	@KUBECONFIG=$(KUBECONFIG) helm upgrade --install diting-train-cryo ./charts/diting-training \
+		--namespace $(TRAIN_NS) \
+		--set training.dim=cryo \
+		--set training.maxSteps=$(TRAIN_MAX_STEPS) \
+		--set image.tag=$(TRAIN_IMAGE_TAG) \
+		--wait --timeout 180m
+	@echo "✅ [evo-step04-train-cryo] 完成"
+
+evo-step04-train-thrust: evo-step04-prep
+	@echo "[evo-step04-train-thrust] 安装训练 Job dim=thrust maxSteps=$(TRAIN_MAX_STEPS)"
+	@KUBECONFIG=$(KUBECONFIG) helm upgrade --install diting-train-thrust ./charts/diting-training \
+		--namespace $(TRAIN_NS) \
+		--set training.dim=thrust \
+		--set training.maxSteps=$(TRAIN_MAX_STEPS) \
+		--set image.tag=$(TRAIN_IMAGE_TAG) \
+		--wait --timeout 180m
+	@echo "✅ [evo-step04-train-thrust] 完成"
+
+evo-step04-train-narrative: evo-step04-prep
+	@echo "[evo-step04-train-narrative] 安装训练 Job dim=narrative maxSteps=$(TRAIN_MAX_STEPS)"
+	@KUBECONFIG=$(KUBECONFIG) helm upgrade --install diting-train-narrative ./charts/diting-training \
+		--namespace $(TRAIN_NS) \
+		--set training.dim=narrative \
+		--set training.maxSteps=$(TRAIN_MAX_STEPS) \
+		--set image.tag=$(TRAIN_IMAGE_TAG) \
+		--wait --timeout 180m
+	@echo "✅ [evo-step04-train-narrative] 完成"
+
+evo-step04-status:
+	@echo "[evo-step04-status] 训练 Job 状态（namespace: $(TRAIN_NS)）"
+	@KUBECONFIG=$(KUBECONFIG) kubectl get jobs,pods -n $(TRAIN_NS) -l app=diting-train \
+		-o wide 2>/dev/null || echo "（无训练 Job）"
+
+evo-step04-clean:
+	@echo "[evo-step04-clean] 清理训练 releases..."
+	@for dim in cryo thrust narrative; do \
+		KUBECONFIG=$(KUBECONFIG) helm uninstall diting-train-$$dim -n $(TRAIN_NS) 2>/dev/null \
+			&& echo "  已删除 diting-train-$$dim" || true; \
+	done
+	@echo "✅ [evo-step04-clean] 完成"
+
+evo-step04-all: evo-step04-train-cryo
+	@echo "✅ [evo-step04-all] 至少 1 维（cryo）训练完成"
+
+# ===========================================================================
+# P-step_05 · GPU 推理组（diting-vllm）
+# ===========================================================================
+INFER_NS ?= infer
+
+.PHONY: platform-step05-prep platform-step05-install-infer platform-step05-status platform-step05-all
+
+platform-step05-prep:
+	@echo "[platform-step05-prep] 检查 infer GPU 节点..."
+	@KUBECONFIG=$(KUBECONFIG) kubectl get node -l stack.diting/node=infer 2>&1 | grep -q "Ready" \
+		&& echo "✅ infer GPU 节点 Ready" \
+		|| { echo "❌ 无 Ready infer 节点，请先 make up-stack diting-vllm"; exit 1; }
+	@KUBECONFIG=$(KUBECONFIG) kubectl get ns $(INFER_NS) 2>/dev/null || \
+		KUBECONFIG=$(KUBECONFIG) kubectl create ns $(INFER_NS)
+	@echo "✅ [platform-step05-prep] 就绪"
+
+platform-step05-install-infer: platform-step05-prep
+	@echo "[platform-step05-install-infer] 部署 vLLM Deployment..."
+	@KUBECONFIG=$(KUBECONFIG) helm upgrade --install diting-infer ./charts/diting-vllm \
+		--namespace $(INFER_NS) \
+		--wait --timeout 5m
+	@echo "✅ [platform-step05-install-infer] vLLM 就绪"
+
+platform-step05-status:
+	@echo "[platform-step05-status] infer namespace 状态"
+	@KUBECONFIG=$(KUBECONFIG) kubectl get nodes -l stack.diting/node=infer -o wide 2>/dev/null || true
+	@KUBECONFIG=$(KUBECONFIG) kubectl get deploy,pods,svc -n $(INFER_NS) -l app=diting-infer 2>/dev/null || \
+		KUBECONFIG=$(KUBECONFIG) kubectl get all -n $(INFER_NS) 2>/dev/null || echo "（infer ns 空）"
+
+platform-step05-all: platform-step05-install-infer
+	@KUBECONFIG=$(KUBECONFIG) kubectl exec -n $(INFER_NS) deploy/diting-infer -- \
+		curl -s localhost:8000/v1/models 2>/dev/null | head -c 500 || \
+		echo "（探活待 Pod Ready 后重试）"
+	@echo "✅ [platform-step05-all] infer 部署完成"

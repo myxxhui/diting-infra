@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: diting-ingest-{{ .Release.Revision }}{{- if .Values.ingest.triggerRunAt }}-{{ .Values.ingest.triggerRunAt }}{{- end }}
-  namespace: default
+  namespace: {{ .Release.Namespace }}
   labels:
     app: diting
     component: ingest

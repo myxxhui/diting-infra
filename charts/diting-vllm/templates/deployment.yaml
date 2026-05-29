@@ -1,0 +1,120 @@
+{{/* vLLM 推理 Deployment · P-step_05 */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diting-infer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting-infer
+    release: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: diting-infer
+  template:
+    metadata:
+      labels:
+        app: diting-infer
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        {{- range $k, $v := .Values.nodeSelector }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+      {{- if .Values.tolerations }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: setup
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "[setup] 检查 NAS 与 LoRA 路径..."
+              ls /mnt/titan-data/models || { echo "❌ 模型目录未挂载"; exit 1; }
+              {{- range $dim, $path := .Values.vllm.loraAdapterPaths }}
+              if [ -f "{{ $path }}/adapter_model.safetensors" ] || [ -f "{{ $path }}/adapter_model.bin" ]; then
+                echo "  ✅ {{ $dim }}: {{ $path }}"
+              else
+                echo "  ⚠️ {{ $dim }}: {{ $path }} 暂无 adapter（跳过加载）"
+              fi
+              {{- end }}
+              echo "[setup] ✅ init 完成"
+          volumeMounts:
+            - name: nas-storage
+              mountPath: /mnt/titan-data
+              readOnly: true
+      containers:
+        - name: vllm
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              ARGS=(
+                --model "{{ .Values.vllm.baseModelPath }}"
+                --host "0.0.0.0"
+                --port "8000"
+                --max-model-len "{{ .Values.vllm.maxModelLen }}"
+                --gpu-memory-utilization "{{ .Values.vllm.gpuMemoryUtilization }}"
+                --dtype "{{ .Values.vllm.dtype | default "half" }}"
+                --trust-remote-code
+              )
+              {{- if .Values.vllm.enableLora }}
+              ARGS+=(--enable-lora --max-loras "{{ .Values.vllm.maxLoras }}")
+              LORA_MODULES=()
+              {{- range $dim, $path := .Values.vllm.loraAdapterPaths }}
+              if [ -f "{{ $path }}/adapter_model.safetensors" ] || [ -f "{{ $path }}/adapter_model.bin" ]; then
+                LORA_MODULES+=("lora-{{ $dim }}={{ $path }}")
+                echo "[vllm] LoRA 模块: lora-{{ $dim }}={{ $path }}"
+              fi
+              {{- end }}
+              if [ "${#LORA_MODULES[@]}" -gt 0 ]; then
+                ARGS+=(--lora-modules "${LORA_MODULES[@]}")
+              fi
+              {{- end }}
+              echo "[vllm] 启动: python3 -m vllm.entrypoints.openai.api_server ${ARGS[*]}"
+              exec python3 -m vllm.entrypoints.openai.api_server "${ARGS[@]}"
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: nas-storage
+              mountPath: /mnt/titan-data
+              readOnly: true
+      volumes:
+        - name: nas-storage
+          hostPath:
+            path: /mnt/titan-data
+            type: DirectoryOrCreate

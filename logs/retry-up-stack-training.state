@@ -1,0 +1,9 @@
+status=success
+detail=train stack up
+last_attempt=2026-05-27T00:47:53Z
+next_attempt=
+region=cn-hongkong
+instance_type=ecs.gn6i-c4g1.xlarge
+preferred_zone=cn-hongkong-b
+retry_interval_sec=7200
+pid=96287

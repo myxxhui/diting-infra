@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: diting-semantic-classifier-a
-  namespace: default
+  namespace: {{ .Release.Namespace }}
   labels:
     app: diting
     component: semantic-classifier-a

@@ -1,16 +1,16 @@
 # diting prod。make down 仅释放 ECS/EIP。instance_password 建议 TF_VAR_instance_password 注入。
 
-env_id            = "prod"
-region            = "cn-hongkong"
-instance_type     = "ecs.u1-c1m4.xlarge"
+env_id        = "prod"
+region        = "cn-hongkong"
+instance_type = "ecs.u1-c1m4.xlarge"
 # instance_password 由 diting-infra/.env 的 TF_VAR_instance_password 注入（勿在此写明文）
-vpc_cidr          = "10.0.0.0/16"
-vswitch_cidr      = "10.0.1.0/24"
-enable_spot       = true
-spot_strategy     = "SpotAsPriceGo"
-spot_price_limit  = 0.5
-eip_bandwidth     = 100
-disk_category     = "cloud_essd"
+vpc_cidr         = "10.0.0.0/16"
+vswitch_cidr     = "10.0.1.0/24"
+enable_spot      = true
+spot_strategy    = "SpotAsPriceGo"
+spot_price_limit = 0.5
+eip_bandwidth    = 100
+disk_category    = "cloud_essd"
 
 # 安全组 SSH/6443：不通过本仓脚本/配置管理，由控制台或已有规则控制；Terraform 若需写规则则用 0.0.0.0/0 避免单 IP 限制
 ssh_allowed_cidr = "0.0.0.0/0"
@@ -25,7 +25,9 @@ nas_existing_access_group_name = "deploy-engine_nas_group_prod"
 nas_use_existing_mount_target = true
 
 nas_existing_mount_target_domain = "12db2e48f90-hpy48.cn-hongkong.nas.aliyuncs.com"
-use_existing_data_disk_id        = "d-j6cc6ew2bqkfdlwaavit"
+# 数据盘由 Terraform alicloud_disk.prod_data 管理；Down 后 disk_id 写入 prod.disk_id 供下次 Up 复用
+# use_existing_data_disk_id 留空；若需复用已有盘则填 ID 并从 state rm prod_data[0]
+use_existing_data_disk_id = ""
 
 enable_prod_data_disk = true
 data_disk_size        = 100
@@ -56,7 +58,7 @@ stacks = {
   }
   train = {
     instance_type        = "ecs.gn6i-c4g1.xlarge"
-    spot_strategy        = "SpotAsPriceGo"
+    spot_strategy        = "NoSpot"  # 2026-05-26 Spot 三区 SoldOut · 临时改按量（cn-hongkong-b Available）
     spot_price_limit     = 3.0
     image_family         = "ubuntu_22_04_gpu"
     system_disk_gb       = 100
@@ -65,11 +67,11 @@ stacks = {
     k3s_role             = "agent"
     node_labels          = { "stack.diting/node" = "train", "nvidia.com/gpu" = "present" }
     enable_eip           = false
-    count                = 0
+    count                = 1
   }
   infer = {
     instance_type        = "ecs.gn6i-c4g1.xlarge"
-    spot_strategy        = "SpotAsPriceGo"
+    spot_strategy        = "NoSpot"  # Spot 三区 SoldOut · 临时按量（与 train 一致）
     spot_price_limit     = 3.0
     image_family         = "ubuntu_22_04_gpu"
     system_disk_gb       = 100
@@ -78,6 +80,6 @@ stacks = {
     k3s_role             = "agent"
     node_labels          = { "stack.diting/node" = "infer", "nvidia.com/gpu" = "present" }
     enable_eip           = false
-    count                = 0
+    count                = 1
   }
 }

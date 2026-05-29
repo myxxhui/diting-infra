@@ -1,0 +1,26 @@
+{{/* 训练超参 ConfigMap · P-step_04 实现 */}}
+{{/* [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_04_C3_LLaMA_Factory训练流水线.md §7.1 B] */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+    dim: {{ .Values.training.dim }}
+data:
+  LORA_NAME: {{ printf "%s_lora_v1" .Values.training.dim | quote }}
+  DIM: {{ .Values.training.dim | quote }}
+  MAX_STEPS: {{ .Values.training.maxSteps | quote }}
+  DATA_PATH: {{ printf "/mnt/titan-data/lora/data/%s" .Values.training.dim | quote }}
+  OUTPUT_PATH: {{ printf "/mnt/titan-data/lora/%s" .Values.training.dim | quote }}
+  BASE_MODEL: "/mnt/titan-data/models/Qwen2.5-1.5B-Instruct"
+  LORA_RANK: {{ .Values.hyperparams.loraRank | quote }}
+  LORA_ALPHA: {{ .Values.hyperparams.loraAlpha | quote }}
+  LEARNING_RATE: {{ .Values.hyperparams.learningRate | quote }}
+  PER_DEVICE_TRAIN_BATCH_SIZE: {{ .Values.hyperparams.perDeviceTrainBatchSize | quote }}
+  GRADIENT_ACCUMULATION_STEPS: {{ .Values.hyperparams.gradientAccumulationSteps | quote }}
+  WARMUP_STEPS: {{ .Values.hyperparams.warmupSteps | quote }}
+  SAVE_STEPS: {{ .Values.hyperparams.saveSteps | quote }}
+  QLORA_FALLBACK: "true"
+  NAS_MOUNT: "/mnt/titan-data"

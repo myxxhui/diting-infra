@@ -5,7 +5,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: diting-schema-init-sql
-  namespace: default
+  namespace: {{ .Release.Namespace }}
   labels:
     app: diting
     component: schema-init

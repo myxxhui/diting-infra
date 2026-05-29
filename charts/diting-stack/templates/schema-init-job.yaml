@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: diting-schema-init-{{ .Release.Revision }}
-  namespace: default
+  namespace: {{ .Release.Namespace }}
   labels:
     app: diting
     component: schema-init

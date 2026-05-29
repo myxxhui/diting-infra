@@ -1,0 +1,17 @@
+# W5 · 复用 train GPU 节点跑 vLLM（不另起 infer ECS）
+nodeSelector:
+  stack.diting/node: train
+  nvidia.com/gpu: present
+
+tolerations:
+  - key: stack.diting/node
+    operator: Equal
+    value: train
+    effect: NoSchedule
+
+image:
+  pullPolicy: Never
+
+service:
+  type: NodePort
+  port: 8000

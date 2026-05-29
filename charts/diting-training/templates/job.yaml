@@ -1,0 +1,174 @@
+{{/* LoRA 训练 Job · P-step_04 实现 */}}
+{{/* [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_04_C3_LLaMA_Factory训练流水线.md §7.1 A] */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting-train
+    dim: {{ .Values.training.dim }}
+    release: {{ .Release.Name }}
+spec:
+  # 失败最多重试 1 次（OOM 等偶发场景）
+  backoffLimit: 1
+  # 训练最长 3 小时
+  activeDeadlineSeconds: 10800
+  template:
+    metadata:
+      labels:
+        app: diting-train
+        dim: {{ .Values.training.dim }}
+    spec:
+      restartPolicy: Never
+
+      # 使用 nvidia 容器运行时（使 CUDA 对容器可见）
+      runtimeClassName: nvidia
+
+      # 绑定到 train GPU 节点
+      nodeSelector:
+        {{- range $k, $v := .Values.nodeSelector }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+
+      {{- if .Values.tolerations }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      {{- end }}
+
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+
+      # initContainer：确保 NAS 路径存在 + 检查 GPU 可用性
+      initContainers:
+        - name: setup
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "[setup] 检查 NAS 挂载..."
+              ls /mnt/titan-data || { echo "❌ NAS 未挂载"; exit 1; }
+              mkdir -p /mnt/titan-data/lora/data/{{ .Values.training.dim }}
+              mkdir -p /mnt/titan-data/lora/{{ .Values.training.dim }}
+              echo "[setup] NAS 路径就绪: /mnt/titan-data/lora/{data/{{ .Values.training.dim }},{{ .Values.training.dim }}}"
+
+              echo "[setup] 检查 GPU..."
+              nvidia-smi | head -5 2>/dev/null || echo "[setup] ⚠️ nvidia-smi 不可用（init container 无 GPU 访问权，训练容器会有）"
+              python3 -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}, count={torch.cuda.device_count()}')" 2>/dev/null || true
+              echo "[setup] ✅ init 完成"
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          volumeMounts:
+            - name: nas-storage
+              mountPath: /mnt/titan-data
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+            requests:
+              nvidia.com/gpu: 1
+
+      containers:
+        - name: train
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              export PYTHONPATH=/workspace:${PYTHONPATH:-}
+              cd /workspace
+
+              # 安装 diting-src 依赖（从 NAS wheels 离线安装，train 无公网）
+              echo "=== [train] 安装依赖（NAS wheels）==="
+              if [ -d /mnt/titan-data/pip-wheels ] && ls /mnt/titan-data/pip-wheels/*.whl 2>/dev/null | head -1; then
+                pip install -q --no-index --find-links /mnt/titan-data/pip-wheels \
+                  redis pydantic python-dotenv 2>&1 | tail -3 || \
+                pip install -q --no-index --find-links /mnt/titan-data/pip-wheels \
+                  redis pydantic 2>&1 | tail -3 || true
+              else
+                echo "  wheels 目录未就绪，跳过（脚本已处理 ImportError 降级）"
+              fi
+
+              echo "=== [train] 启动 LoRA 训练 dim={{ .Values.training.dim }} ==="
+              echo "  DATA_PATH=${DATA_PATH}"
+              echo "  OUTPUT_PATH=${OUTPUT_PATH}"
+              echo "  BASE_MODEL=${BASE_MODEL}"
+              echo "  MAX_STEPS=${MAX_STEPS}"
+
+              # 数据文件检查（verified JSONL）
+              DATA_FILE="${DATA_PATH}/train.jsonl"
+              if [ ! -f "$DATA_FILE" ]; then
+                echo "⚠️ 未找到 ${DATA_FILE}，使用 dry-run 模式"
+                DRY_RUN_FLAG="--dry-run --no-require-verified"
+                DATA_FILE="/workspace/training/data/distilled/financial_fraud/sanity_dry_run.jsonl"
+              else
+                DRY_RUN_FLAG="--no-require-verified"
+                echo "  使用数据: $DATA_FILE ($(wc -l < $DATA_FILE) 行)"
+              fi
+
+              TASK="{{ index .Values.training.taskByDim .Values.training.dim | default "financial_fraud" }}"
+              python -m scripts.training.train_lora \
+                --lora-name "${LORA_NAME}" \
+                --task "${TASK}" \
+                --data "${DATA_FILE}" \
+                --base-model "${BASE_MODEL}" \
+                --rank "${LORA_RANK}" \
+                --lora-alpha "${LORA_ALPHA}" \
+                --learning-rate "${LEARNING_RATE}" \
+                --max-steps "${MAX_STEPS}" \
+                --min-free-mib 0 \
+                ${DRY_RUN_FLAG} \
+                2>&1 | tee /mnt/titan-data/lora/{{ .Values.training.dim }}/train.log
+
+              echo "=== [train] ✅ 训练完成 dim={{ .Values.training.dim }} ==="
+              echo "  权重输出: ${OUTPUT_PATH}"
+              ls -lh "${OUTPUT_PATH}" 2>/dev/null || true
+
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          {{- if or .Values.secrets.hfToken .Values.secrets.wandbApiKey }}
+          env:
+            {{- if .Values.secrets.hfToken }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: hf-token
+                  optional: true
+            {{- end }}
+            {{- if .Values.secrets.wandbApiKey }}
+            - name: WANDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: wandb-api-key
+                  optional: true
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: nas-storage
+              mountPath: /mnt/titan-data
+            - name: workspace-src
+              mountPath: /workspace
+          workingDir: /workspace
+
+      volumes:
+        - name: nas-storage
+          hostPath:
+            path: /mnt/titan-data
+            type: DirectoryOrCreate
+        - name: workspace-src
+          hostPath:
+            # diting-src 已通过 make deploy 同步到 NAS，train 从 NAS 读取
+            path: /mnt/titan-data/diting-src
+            type: DirectoryOrCreate
