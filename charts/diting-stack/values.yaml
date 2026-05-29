@@ -120,3 +120,45 @@ module_a:
     limits:
       memory: "512Mi"
       cpu: "500m"
+
+# Copilot 副驾驶 Web（持仓体检 / 告警 / 价值账本前端）
+copilot:
+  enabled: false
+  replicas: 1
+  image:
+    repository: diting-copilot
+    tag: latest
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  redisHost: "redis-master.default.svc.cluster.local"
+  redisPort: "6379"
+  redisDb: "0"
+  dbUrl: "sqlite+aiosqlite:////data/copilot.db"
+  alertConsumerEnabled: "true"
+  ledgerSchedulerEnabled: "false"
+  smtp:
+    enabled: false
+    host: ""
+    port: "587"
+    useSsl: "false"
+    username: ""
+    password: ""
+    from: ""
+    to: ""
+  service:
+    type: NodePort
+    nodePort: 30080
+  persistence:
+    enabled: true
+    storageClass: local-path
+    accessMode: ReadWriteOnce
+    size: 2Gi
+  # 挂载为 Secret /config/my_holdings.yaml；生产请用真实持仓（勿提交密钥仓）
+  holdingsYaml: ""
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "768Mi"
+      cpu: "500m"

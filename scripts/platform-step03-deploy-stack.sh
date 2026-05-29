@@ -12,10 +12,30 @@ CFG="$CONFIG_ROOT/${PROJECT}-${ENV}.yaml"
 CONN_FILE="${CONN_FILE:-$INFRA_ROOT/prod.conn}"
 # 避免 Makefile 传入绝对路径时与 INFRA_ROOT 重复拼接
 case "$CONN_FILE" in /*) ;; *) CONN_FILE="$INFRA_ROOT/$CONN_FILE" ;; esac
-KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-${PROJECT}-${ENV}}"
-export KUBECONFIG
+DITING_KUBECONFIG="$HOME/.kube/config-${PROJECT}-${ENV}"
 
 command -v yq >/dev/null 2>&1 || { echo "错误: 需要 yq"; exit 1; }
+# 强制使用 diting-prod kubeconfig，忽略 shell 里指向 ACK 的 KUBECONFIG=/root/kubeconfig
+if [ -f "$DITING_KUBECONFIG" ]; then
+  bash "$SCRIPT_DIR/kubecm-helpers.sh" add-and-switch "$PROJECT" "$ENV" || true
+else
+  echo "错误: 缺少 $DITING_KUBECONFIG，请先 make kubeconfig-sync prod diting"
+  exit 1
+fi
+export KUBECONFIG="$HOME/.kube/config"
+kubectl config use-context "${PROJECT}-${ENV}" 2>/dev/null || kubectl config use-context default
+SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo '')"
+NODE_COUNT="$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+echo "[platform-step03-deploy] context=$(kubectl config current-context) server=$SERVER nodes=$NODE_COUNT"
+if [ -z "$SERVER" ] || ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+  echo "错误: 无法连接 diting-prod 集群（server=$SERVER）"
+  exit 1
+fi
+if [ "${NODE_COUNT:-0}" -gt 3 ]; then
+  echo "错误: 当前集群有 ${NODE_COUNT} 个节点，疑似 ACK 而非 diting-prod（应为 1 台 K3s）"
+  echo "  请: export KUBECONFIG=\$HOME/.kube/config && kubecm switch diting-prod"
+  exit 1
+fi
 command -v helm >/dev/null 2>&1 || { echo "错误: 需要 helm"; exit 1; }
 command -v kubectl >/dev/null 2>&1 || { echo "错误: 需要 kubectl"; exit 1; }
 [ -f "$CFG" ] || { echo "错误: 配置不存在 $CFG"; exit 1; }
@@ -133,7 +153,7 @@ fi
 
 # ── 6) diting-stack 全量（schema-init + module_a）──────────────────────
 TMP_FULL="$(mktemp)"
-yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest}' "$CFG" > "$TMP_FULL"
+yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP_FULL"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
@@ -142,6 +162,12 @@ yq eval -i "
   .storage.timescaledb.pvc.namespace = \"${STACK_NS}\" |
   .storage.postgresL2.pvc.namespace = \"${STACK_NS}\"
 " "$TMP_FULL"
+if yq eval '.copilot.enabled // false' "$TMP_FULL" | grep -q true; then
+  yq eval -i "
+    .copilot.redisHost = \"redis-master.${STACK_NS}.svc.cluster.local\" |
+    .copilot.redisPort = \"6379\"
+  " "$TMP_FULL"
+fi
 helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_FULL" --wait --timeout=8m
 rm -f "$TMP_FULL"
 echo "  [S4/S5] schema-init + module_a chart 升级 ✅"

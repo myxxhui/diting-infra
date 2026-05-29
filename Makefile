@@ -16,6 +16,7 @@ STAGE2_01_NS ?= default
 export
 
 .PHONY: update-deploy-engine deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod
+.PHONY: ensure-kubecm kubecm-add-switch kubecm-remove kubeconfig-sync kubeconfig-restore-state
 
 # 占位目标：make deploy diting prod / make down diting prod 时不被当作文件
 diting:
@@ -27,10 +28,32 @@ prod:
 update-deploy-engine:
 	@git submodule update --init --remote $(DEPLOY_ENGINE_DIR) && echo "[OK] deploy-engine 已更新"
 
+# kubecm 多 kubeconfig 管理（P 轨 / deploy-engine 配套）
+ensure-kubecm:
+	@bash scripts/kubecm-helpers.sh ensure
+
+kubecm-add-switch:
+	@bash scripts/kubecm-helpers.sh add-and-switch $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+kubecm-remove:
+	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+# 从 deploy-engine state 恢复 kubeconfig 并注册 kubecm
+kubeconfig-restore-state:
+	@bash scripts/kubeconfig-restore-state.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+# 拉取 kubeconfig 并注册到 kubecm：make kubeconfig-sync [env] [project]
+kubeconfig-sync:
+	@_e=$(word 2,$(MAKECMDGOALS)); _p=$(word 3,$(MAKECMDGOALS)); \
+	CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/kubeconfig-fetch.sh "$${_e:-prod}" "$${_p:-diting}"
+
 # make deploy [project] [env]：无参数时用 PROJECT/ENV；make deploy diting prod = 生产数据环境 Up
 deploy: update-deploy-engine
 	@_p=$(word 2,$(MAKECMDGOALS)); _e=$(word 3,$(MAKECMDGOALS)); \
-	if [ "$$_p" = "diting" ] && [ "$$_e" = "prod" ]; then $(MAKE) deploy-diting-prod; else CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}"; fi
+	if [ "$$_p" = "diting" ] && [ "$$_e" = "prod" ]; then $(MAKE) deploy-diting-prod; else \
+		CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}"; \
+		bash scripts/kubecm-helpers.sh add-and-switch "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}" || true; \
+	fi
 
 # 调用 deploy-engine Up（需 Terraform 与云凭证）；等价 make deploy $(PROJECT) $(ENV)
 deploy-dev: update-deploy-engine
@@ -39,7 +62,10 @@ deploy-dev: update-deploy-engine
 # make down [project] [env]：无参数时用 PROJECT/ENV；make down diting prod = 生产数据环境 Down（回收且磁盘保留）
 down:
 	@_p=$(word 2,$(MAKECMDGOALS)); _e=$(word 3,$(MAKECMDGOALS)); \
-	if [ "$$_p" = "diting" ] && [ "$$_e" = "prod" ]; then $(MAKE) down-diting-prod; else CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}"; fi
+	if [ "$$_p" = "diting" ] && [ "$$_e" = "prod" ]; then $(MAKE) down-diting-prod; else \
+		CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}"; \
+		bash scripts/kubecm-helpers.sh remove "$${_p:-$(PROJECT)}" "$${_e:-$(ENV)}" || true; \
+	fi
 
 # Stage2-01 仅清理 K3s 上本步资源（中间件、Job、ConfigMap）
 stage2-01-down:
@@ -149,6 +175,11 @@ deploy-diting-prod: update-deploy-engine
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@echo ""
 	@echo "=========================================="
+	@echo "  注册 kubeconfig 到 kubecm 并切换当前 context"
+	@echo "=========================================="
+	@bash scripts/kubecm-helpers.sh add-and-switch $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@echo ""
+	@echo "=========================================="
 	@echo "  部署 Platform Stack（P-step_03 · platform-base + diting-stack + DB）"
 	@echo "=========================================="
 	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
@@ -179,11 +210,10 @@ deploy-diting-prod: update-deploy-engine
 	@echo "  ✅ 部署完成！"
 	@echo "=========================================="
 	@echo ""
-	@echo "KUBECONFIG 已写入 ~/.bashrc、~/.zshrc、~/.profile，新开终端（bash/zsh）将默认生效。"
-	@echo "当前终端若未生效，请执行其一："
-	@echo "    export KUBECONFIG=\"$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)\""
-	@echo "    或 source ~/.bashrc   # bash"
-	@echo "    或 source ~/.zshrc   # zsh"
+	@echo "kubecm 已合并 kubeconfig 并切换 context → $(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"
+	@echo "KUBECONFIG=$$HOME/.kube/config（已写入 ~/.bashrc / ~/.zshrc / ~/.profile）"
+	@echo "当前终端: export KUBECONFIG=\"$$HOME/.kube/config\" 或 source ~/.bashrc"
+	@echo "切换环境: kubecm switch <context> · 列表: kubecm ls"
 	@echo ""
 	@echo "验证: kubectl get nodes && kubectl get pods -A"
 	@echo "=========================================="
@@ -291,7 +321,8 @@ down-diting-prod:
 		fi; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
-	@echo "make down diting prod OK（ECS/EIP 已回收；数据盘已保留，再次执行 make deploy diting prod 将挂载同盘）"
+	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
+	@echo "make down diting prod OK（ECS/EIP 已回收；kubecm context 已移除；数据盘已保留，再次执行 make deploy diting prod 将挂载同盘）"
 
 # ============================================================================
 # v2 多 stack（P 轨）— diting-infra 壳调 deploy-engine 新 target
@@ -330,7 +361,8 @@ up-stack: update-deploy-engine
 		echo "[up-stack] 复用数据盘 TF_VAR_use_existing_data_disk_id=$$TF_VAR_use_existing_data_disk_id"; \
 	fi; \
 	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; \
-	bash scripts/eip-association-guard.sh "$$_stack" || echo "[up-stack] ⚠️ EIP 守门返回非 0，请检查 (不阻塞)"
+	bash scripts/eip-association-guard.sh "$$_stack" || echo "[up-stack] ⚠️ EIP/端口守门未通过（ECS/K3s 可能仍在启动，稍后 make kubeconfig-sync prod diting）"; \
+	CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/kubeconfig-fetch.sh prod diting || true
 
 down-stack: update-deploy-engine
 	@_chart=$(word 2,$(MAKECMDGOALS)); \
@@ -355,7 +387,10 @@ down-stack: update-deploy-engine
 	else \
 		echo "（kubeconfig 不存在，跳过 helm uninstall）"; \
 	fi; \
-	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack
+	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; \
+	if [ "$$_chart" = "diting-stack" ]; then \
+		bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true; \
+	fi
 
 down-platform-base: update-deploy-engine
 	@echo "[down-platform-base] 销所有 ECS+EIP + 集群级 K8s · 保留永驻 10 项"
@@ -364,6 +399,7 @@ down-platform-base: update-deploy-engine
 			helm uninstall diting-platform-base -n kube-system 2>/dev/null || true; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-platform-base $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 
 down-all:
 	@if [ "$(FULL_DESTROY)" != "1" ]; then \
@@ -371,6 +407,7 @@ down-all:
 		echo "用法: make down-all FULL_DESTROY=1"; exit 1; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" FULL_DESTROY=1 $(MAKE) -C $(DEPLOY_ENGINE_DIR) down-all $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 
 platform-status:
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) platform-status $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
@@ -379,7 +416,8 @@ platform-status:
 .PHONY: platform-step03-prep platform-step03-up platform-step03-smoke platform-step03-test-persist platform-step03-all
 
 platform-step03-prep:
-	@command -v yq >/dev/null || { echo "❌ 需要 yq"; exit 1; }; \
+	@bash scripts/kubecm-helpers.sh ensure; \
+	command -v yq >/dev/null || { echo "❌ 需要 yq"; exit 1; }; \
 	command -v helm >/dev/null || { echo "❌ 需要 helm"; exit 1; }; \
 	command -v kubectl >/dev/null || { echo "❌ 需要 kubectl"; exit 1; }; \
 	if command -v psql >/dev/null 2>&1 || [ -x /opt/homebrew/opt/libpq/bin/psql ]; then \
@@ -403,6 +441,20 @@ platform-step03-test-persist: platform-step03-prep
 
 platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-test-persist
 	@echo "✅ [platform-step03-all] up + smoke + persist 完成"
+
+# Copilot 镜像构建推送（工作目录 diting-src）+ 升级 platform 栈内 copilot
+.PHONY: copilot-build-push copilot-smoke-url copilot-sync-smtp
+copilot-sync-smtp:
+	@bash scripts/copilot-sync-smtp-from-src-env.sh
+copilot-build-push:
+	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
+	$(MAKE) -C "$$root/../diting-src" push-copilot-image DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}"
+
+copilot-smoke-url:
+	@_ip=$$(grep '^PUBLIC_IP=' "$(CONN_FILE)" 2>/dev/null | cut -d= -f2-); \
+	_port=$$(yq eval '.stack.copilot.service.nodePort // 30080' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+	echo "Copilot 前端: http://$$_ip:$$_port/health-dashboard"; \
+	echo "工业富联详情: http://$$_ip:$$_port/health-detail/601138"
 
 # P-step_04 · Spot 无库存时定时重试 up-stack diting-training（默认 2h 一次）
 .PHONY: retry-up-stack-training retry-up-stack-training-once retry-up-stack-training-status retry-up-stack-training-stop

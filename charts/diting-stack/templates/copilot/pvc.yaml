@@ -1,0 +1,17 @@
+{{- if and .Values.copilot.enabled .Values.copilot.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: diting-copilot-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting
+    component: copilot
+spec:
+  accessModes:
+    - {{ .Values.copilot.persistence.accessMode }}
+  storageClassName: {{ .Values.copilot.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.copilot.persistence.size }}
+{{- end }}

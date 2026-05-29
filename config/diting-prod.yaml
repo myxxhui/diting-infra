@@ -98,6 +98,35 @@ stack:
     runLoop: true
     runLoopIntervalSec: 86400
 
+  # Copilot 副驾驶 Web：NodePort 暴露前端监控（持仓体检 /health-dashboard、单股 /health-detail/601138）
+  copilot:
+    enabled: true
+    image:
+      repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
+      tag: latest
+      pullPolicy: Always
+    imagePullSecrets: ["acr-titan"]
+    redisHost: "redis-master.platform.svc.cluster.local"
+    redisPort: "6379"
+    redisDb: "0"
+    service:
+      type: NodePort
+      nodePort: 30080
+    holdingsYaml: |
+      holdings:
+        - symbol: "601138"
+          name: "工业富联"
+          active: true
+          role: portfolio
+          quantity: 0
+          cost_price: 0
+          opened_at: "2024-01-01"
+          segment: "科技"
+          notes: "K3s Helm 部署 SoT；请在本地 my_holdings.yaml 维护真实股数成本后同步"
+      defaults:
+        crawl_years: [2022, 2023, 2024, 2025]
+        throttle_sec: 0.6
+
   # 数据库部署参数（供脚本调用 bitnami/postgresql、bitnami/redis 使用）
   # 服务暴露方式由此处与 Chart 控制，Makefile 仅从本配置读取并传递 helm，不写死（见系统规则「部署内容由配置与 Chart 控制」）
   databases:

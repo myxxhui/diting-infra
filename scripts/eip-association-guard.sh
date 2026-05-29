@@ -47,21 +47,39 @@ case "$PLAN_EXIT" in
     ;;
 esac
 
-# 端口可达性复验（base ECS 关键端口）
+# 端口可达性复验（base ECS 关键端口）— 新 ECS 需 cloud-init + K3s 初始化，默认轮询等待
 PUBLIC_IP="$(terraform output -raw public_ip 2>/dev/null || echo '')"
 [ -z "$PUBLIC_IP" ] && { echo "[guard] ⚠️ 无 public_ip 输出，跳过端口复验"; exit 0; }
+
+GUARD_SSH_MAX="${GUARD_SSH_MAX_ATTEMPTS:-36}"      # 默认最多 6 分钟等 SSH
+GUARD_SSH_SLEEP="${GUARD_SSH_SLEEP_SEC:-10}"
+GUARD_K3S_MAX="${GUARD_K3S_MAX_ATTEMPTS:-60}"      # SSH 就绪后再最多 10 分钟等 6443
+GUARD_K3S_SLEEP="${GUARD_K3S_SLEEP_SEC:-10}"
+
+wait_port() {
+  local ip="$1" port="$2" label="$3" max="$4" sleep_sec="$5"
+  local attempt=1
+  echo "[guard] 等待 $label ($ip:$port) 最多 ${max}×${sleep_sec}s ..."
+  while [ "$attempt" -le "$max" ]; do
+    if nc -z -w 5 "$ip" "$port" >/dev/null 2>&1; then
+      echo "  ✅ $port open（第 ${attempt} 次探测）"
+      return 0
+    fi
+    echo "  … $label 未就绪 ($attempt/$max)"
+    sleep "$sleep_sec"
+    attempt=$((attempt + 1))
+  done
+  echo "  ❌ $port timeout（已等待 $((max * sleep_sec))s）"
+  return 1
+}
+
 echo "[guard] 端口复验 $PUBLIC_IP ..."
-unreach=0
-for port in 6443 22; do
-  if nc -z -w 5 "$PUBLIC_IP" "$port" >/dev/null 2>&1; then
-    echo "  ✅ $port open"
-  else
-    echo "  ❌ $port timeout"
-    unreach=$((unreach + 1))
-  fi
-done
-if [ "$unreach" -gt 0 ]; then
-  echo "[guard] ⚠️ 修复后仍有端口不可达；可能 ECS 仍在启动中或安全组异常"
+if ! wait_port "$PUBLIC_IP" 22 "SSH" "$GUARD_SSH_MAX" "$GUARD_SSH_SLEEP"; then
+  echo "[guard] ⚠️ SSH 长时间不可达，请检查安全组/实例状态"
+  exit 2
+fi
+if ! wait_port "$PUBLIC_IP" 6443 "K3s API" "$GUARD_K3S_MAX" "$GUARD_K3S_SLEEP"; then
+  echo "[guard] ⚠️ K3s 6443 长时间不可达；可稍后 make kubeconfig-sync prod diting 重试"
   exit 2
 fi
 echo "[guard] ✅ 端口复验通过"

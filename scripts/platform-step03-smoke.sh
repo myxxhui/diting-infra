@@ -82,6 +82,24 @@ else
   echo "  ⚠️ 跳过 S6（无 psql 或 PUBLIC_IP）"
 fi
 
+# S7 Copilot Web（若 chart values 启用）
+COPILOT_ENABLED="$(yq eval '.stack.copilot.enabled // false' "$CFG")"
+PORT_COPILOT="$(yq eval '.stack.copilot.service.nodePort // 30080' "$CFG")"
+if [ "$COPILOT_ENABLED" = "true" ]; then
+  if kubectl get pod -n "$STACK_NS" 2>/dev/null | grep diting-copilot | grep -q Running; then
+    _ok "S7 diting-copilot Running"
+  else
+    _fail "S7 diting-copilot 未 Running"
+  fi
+  if [ -n "$PUBLIC_IP" ] && curl -sf -m 8 "http://${PUBLIC_IP}:${PORT_COPILOT}/health" >/dev/null 2>&1; then
+    _ok "S7 Copilot NodePort $PORT_COPILOT /health 可达"
+  else
+    _fail "S7 Copilot NodePort $PORT_COPILOT 不可达"
+  fi
+else
+  echo "  ⚠️ 跳过 S7（copilot.enabled=false）"
+fi
+
 # D4
 [ -n "$DISK_ID" ] && _ok "D4 data_disk_id=$DISK_ID" || _fail "D4 无 data_disk_id"
 
