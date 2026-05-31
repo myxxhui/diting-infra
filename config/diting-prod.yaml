@@ -109,6 +109,16 @@ stack:
     redisHost: "redis-master.platform.svc.cluster.local"
     redisPort: "6379"
     redisDb: "0"
+    # 行情雷达模式 C 深度研报：T2 Opus 开关 + 模型；anthropicApiKey 由
+    # copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入（密钥不入库）
+    ai:
+      radarT2Enabled: "true"
+      lighthouseModel: "claude-opus-4-6"
+      anthropicModel: "claude-opus-4-6"
+      anthropicBaseUrl: "https://api.anthropic.com"
+    radarT0CacheDir: "/data/radar_t0_cache"
+    radarT0CacheMaxAgeHours: "24"
+    radarT0LiveFallback: "true"
     service:
       type: NodePort
       nodePort: 30080

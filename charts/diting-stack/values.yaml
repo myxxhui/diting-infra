@@ -136,6 +136,9 @@ copilot:
   dbUrl: "sqlite+aiosqlite:////data/copilot.db"
   alertConsumerEnabled: "true"
   ledgerSchedulerEnabled: "false"
+  radarT0CacheDir: "/data/radar_t0_cache"
+  radarT0CacheMaxAgeHours: "24"
+  radarT0LiveFallback: "true"
   smtp:
     enabled: false
     host: ""

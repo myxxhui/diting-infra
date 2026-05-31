@@ -450,6 +450,82 @@ copilot-build-push:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
 	$(MAKE) -C "$$root/../diting-src" push-copilot-image DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}"
 
+# step_12 · 推镜像 + 滚动重启 Copilot + tier-2 HTTP 验收（①~④）
+.PHONY: copilot-step12-deploy
+copilot-step12-deploy: copilot-build-push
+	@echo "▶ [copilot-step12-deploy] rollout restart diting-copilot @ platform"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step12-tier2-verify
+
+.PHONY: copilot-step14-deploy
+copilot-step14-deploy: copilot-build-push
+	@echo "▶ [copilot-step14-deploy] rollout restart diting-copilot @ platform · step14 验收"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step14-tier2-verify
+
+.PHONY: copilot-step15-deploy
+copilot-step15-deploy: copilot-build-push
+	@echo "▶ [copilot-step15-deploy] rollout restart diting-copilot @ platform · step15 验收"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step15-tier2-verify
+
+.PHONY: copilot-step16-deploy
+copilot-step16-deploy: copilot-build-push
+	@echo "▶ [copilot-step16-deploy] rollout restart diting-copilot @ platform · step16 验收"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step16-tier2-verify
+
+.PHONY: copilot-step17-deploy
+copilot-funnel-deploy: copilot-build-push
+	@echo "▶ [copilot-funnel-deploy] rollout restart diting-copilot @ platform · 四区漏斗标的级重构"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@echo "▶ [copilot-funnel-deploy] 生产清空重建（保留 holdings_sot）"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl exec -n platform deployment/diting-copilot -- \
+		python3 scripts/copilot_funnel_cleanup.py
+	@echo "✅ [copilot-funnel-deploy] 漏斗重构生产部署完成"
+
+# 模式 C 深度研报：推镜像 + 注入 Opus env(从 diting-src/.env) + rollout + 601138 真扫验收
+.PHONY: copilot-modec-deploy copilot-modec-verify
+copilot-modec-deploy: copilot-build-push
+	@echo "▶ [copilot-modec-deploy] 注入 ANTHROPIC_API_KEY + RADAR_T2_ENABLED 并 helm upgrade"
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/copilot-sync-ai-from-src-env.sh
+	@echo "▶ [copilot-modec-deploy] rollout restart diting-copilot @ platform · 模式 C 深度研报"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@$(MAKE) copilot-modec-verify
+	@echo "✅ [copilot-modec-deploy] 模式 C 深度研报生产部署完成"
+
+copilot-modec-verify:
+	@echo "▶ [copilot-modec-verify] 601138 真扫：校验 t2_status=ok + 9 维 + 成本（T2 读缓存）"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl exec -n platform deployment/diting-copilot -- \
+		python3 -c "import json,urllib.parse,urllib.request; \
+data=urllib.parse.urlencode({'input_type':'symbol','query_text':'601138','enable_t2':'true'}).encode(); \
+req=urllib.request.Request('http://127.0.0.1:8080/api/radar/scans',data=data,method='POST'); \
+d=json.loads(urllib.request.urlopen(req,timeout=180).read()); \
+c=d['candidates'][0]; s=c.get('t2_status'); cost=(c.get('cost') or {}).get('cost_yuan'); \
+dims=(c.get('deep_analysis') or {}).get('dimensions') or {}; \
+print('t2_status=',s,'| 维度数=',len(dims),'| 成本 ¥',cost,'| cache路由=',(c.get('cost') or {}).get('route'), \
+'| 结论=',((c.get('deep_analysis') or {}).get('overall') or {}).get('conclusion')); \
+assert s=='ok', '模式 C T2 非 ok：'+str(c.get('t2_detail')); assert len(dims)==9; assert cost and float(cost)>0"
+	@echo "✅ [copilot-modec-verify] 模式 C 真扫验收通过（9 维真实内容 + 成本透出）"
+
+.PHONY: radar-t0-sync
+radar-t0-sync:
+	@chmod +x scripts/radar-t0-sync-to-prod.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/radar-t0-sync-to-prod.sh
+
+.PHONY: copilot-step17-deploy
+copilot-step17-deploy: copilot-build-push
+	@echo "▶ [copilot-step17-deploy] rollout restart diting-copilot @ platform · step17 执行仓位指导验收"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
+	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
+	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step17-test
+
 copilot-smoke-url:
 	@_ip=$$(grep '^PUBLIC_IP=' "$(CONN_FILE)" 2>/dev/null | cut -d= -f2-); \
 	_port=$$(yq eval '.stack.copilot.service.nodePort // 30080' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \

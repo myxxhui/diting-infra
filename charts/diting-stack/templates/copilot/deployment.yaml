@@ -52,6 +52,12 @@ spec:
           value: {{ .Values.copilot.alertConsumerEnabled | quote }}
         - name: COPILOT_LEDGER_SCHEDULER_ENABLED
           value: {{ .Values.copilot.ledgerSchedulerEnabled | quote }}
+        - name: RADAR_T0_CACHE_DIR
+          value: {{ .Values.copilot.radarT0CacheDir | default "/data/radar_t0_cache" | quote }}
+        - name: RADAR_T0_CACHE_MAX_AGE_HOURS
+          value: {{ .Values.copilot.radarT0CacheMaxAgeHours | default "24" | quote }}
+        - name: RADAR_T0_LIVE_FALLBACK
+          value: {{ .Values.copilot.radarT0LiveFallback | default "false" | quote }}
         livenessProbe:
           httpGet:
             path: /health
