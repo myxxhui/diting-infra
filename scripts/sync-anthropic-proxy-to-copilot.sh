@@ -59,13 +59,9 @@ _merge_env "ANTHROPIC_PROXY_USER" "$PROXY_USER" "$SRC_ENV"
 _merge_env "ANTHROPIC_PROXY_HOST" "$PROXY_HOST" "$SRC_ENV"
 _merge_env "ANTHROPIC_PROXY_PORT" "$PROXY_PORT" "$SRC_ENV"
 
-export HTTPS_PROXY="$PROXY_URL"
-export HTTP_PROXY="$PROXY_URL"
-export NO_PROXY="localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-
 echo "▶ [sync-anthropic-proxy] HTTPS_PROXY → Copilot（host=$PROXY_HOST port=$PROXY_PORT）"
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
 bash "$SCRIPT_DIR/copilot-sync-ai-from-src-env.sh"
-kubectl rollout restart deployment/diting-copilot -n platform 2>/dev/null || true
-kubectl rollout status deployment/diting-copilot -n platform --timeout=180s 2>/dev/null || true
+env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout restart deployment/diting-copilot -n platform 2>/dev/null || true
+env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout status deployment/diting-copilot -n platform --timeout=180s 2>/dev/null || true
 echo "✅ [sync-anthropic-proxy] 已合并 $SRC_ENV 并 helm 注入 platform/diting-copilot"

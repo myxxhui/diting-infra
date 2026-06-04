@@ -5,9 +5,10 @@ env_id  = "sg-proxy"
 region  = "ap-southeast-1"
 project = "diting"
 
-instance_type    = "ecs.t6-c1m2.large"
-enable_spot      = true
-spot_strategy    = "SpotAsPriceGo"
+# 新加坡 1a Spot 常无库存：按量 + 经济型 e 系列
+instance_type    = "ecs.e-c1m2.large"
+enable_spot      = false
+spot_strategy    = "NoSpot"
 spot_price_limit = 0.08
 eip_bandwidth    = 50
 disk_category    = "cloud_essd"
@@ -17,10 +18,10 @@ vpc_cidr     = "10.1.0.0/16"
 vswitch_cidr = "10.1.1.0/24"
 ssh_allowed_cidr = "0.0.0.0/0"
 
-# 新建新加坡 VPC（首次 deploy-proxy 自动创建）
-vpc_existing_id            = ""
-vswitch_existing_id        = ""
-security_group_existing_id = ""
+# 复用首次 apply 已创建的 VPC/VSwitch/SG（state 已 rm 托管后仅引用 ID）
+vpc_existing_id            = "vpc-t4nj7m2pbdkb656dv4k39"
+vswitch_existing_id        = "vsw-t4n6jfvolu20jq119liea"
+security_group_existing_id = "sg-t4nbaqrk3ffvdz2qkmsj"
 
 enable_prod_data_disk = false
 
@@ -35,8 +36,8 @@ anthropic_proxy_user   = "ditingproxy"
 
 stacks = {
   proxy = {
-    instance_type        = "ecs.t6-c1m2.large"
-    spot_strategy        = "SpotAsPriceGo"
+    instance_type        = "ecs.e-c1m2.large"
+    spot_strategy        = "NoSpot"
     spot_price_limit     = 0.08
     image_family         = "ubuntu_22_04"
     system_disk_gb       = 40

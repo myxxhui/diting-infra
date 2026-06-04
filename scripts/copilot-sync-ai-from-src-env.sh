@@ -75,7 +75,8 @@ if [ -n "${COPILOT_SMTP_USERNAME:-}" ] && [ -n "${COPILOT_SMTP_PASSWORD:-}" ]; t
 fi
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP" --wait --timeout=5m
+# 集群 API 不得走出口代理（仅 Pod 内访问 Anthropic 需要 HTTPS_PROXY）
+env -u HTTPS_PROXY -u HTTP_PROXY helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP" --wait --timeout=5m
 rm -f "$TMP"
-kubectl rollout status deployment/diting-copilot -n "$STACK_NS" --timeout=120s
+env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout status deployment/diting-copilot -n "$STACK_NS" --timeout=120s
 echo "✅ Copilot AI(Opus) env 已注入 · RADAR_T2_ENABLED=${RADAR_T2_ENABLED:-true} · namespace=$STACK_NS"

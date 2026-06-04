@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT="${PROJECT:-diting}"
-ENV="${ENV:-sg-proxy}"
 CONN_FILE="${INFRA_ROOT}/sg-proxy.conn"
 
 if [ -f "$INFRA_ROOT/.env" ]; then
@@ -14,6 +13,9 @@ if [ -f "$INFRA_ROOT/.env" ]; then
   source "$INFRA_ROOT/.env"
   set +a
 fi
+# make 默认 ENV=dev 会覆盖；本脚本固定 sg-proxy
+ENV=sg-proxy
+export ENV
 
 [ -n "${TF_VAR_instance_password:-}" ] || {
   echo "错误: 请在 diting-infra/.env 设置 TF_VAR_instance_password（与 proxy 认证可复用）"
