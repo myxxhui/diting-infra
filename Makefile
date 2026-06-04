@@ -15,13 +15,16 @@ STAGE2_01_NS ?= default
 -include .env
 export
 
-.PHONY: update-deploy-engine deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod
+.PHONY: update-deploy-engine deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
+.PHONY: deploy-sg-anthropic-proxy sync-anthropic-proxy-to-copilot deploy-anthropic-proxy-if-enabled
 .PHONY: ensure-kubecm kubecm-add-switch kubecm-remove kubeconfig-sync kubeconfig-restore-state
 
 # 占位目标：make deploy diting prod / make down diting prod 时不被当作文件
 diting:
 	@true
 prod:
+	@true
+sg-proxy:
 	@true
 
 # 每次执行 Stage1-03 前必做：更新 deploy-engine 代码（submodule）
@@ -173,6 +176,7 @@ deploy-diting-prod: update-deploy-engine
 		fi; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@$(MAKE) deploy-anthropic-proxy-if-enabled
 	@echo ""
 	@echo "=========================================="
 	@echo "  注册 kubeconfig 到 kubecm 并切换当前 context"
@@ -280,21 +284,24 @@ down-diting-prod:
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	if kubectl cluster-info &>/dev/null; then \
+		STACK_NS=$$(yq eval '.stack.namespace // "platform"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		for r in timescaledb postgresql-l2 redis; do helm uninstall "$$r" -n "$$STACK_NS" 2>/dev/null || true; done; \
 		for r in timescaledb postgresql-l2 redis; do helm uninstall "$$r" -n default 2>/dev/null || true; done; \
 		echo "等待 Pod 终止..."; sleep 10; \
-		echo "✅ 数据库 Release 已卸载"; \
+		echo "✅ 数据库 Release 已卸载 (@ $$STACK_NS)"; \
 	else \
 		echo "⚠️  集群不可访问，跳过"; \
 	fi
 	@echo ""
 	@echo "=========================================="
-	@echo "  清理动态 PVC（保留静态 PVC）"
+	@echo "  清理 Redis 动态 PVC（保留静态 Retain PVC）"
 	@echo "=========================================="
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	if kubectl cluster-info &>/dev/null; then \
-		echo "删除 Redis 动态 PVC..."; \
+		STACK_NS=$$(yq eval '.stack.namespace // "platform"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+		kubectl delete pvc -n "$$STACK_NS" redis-data-redis-master-0 --ignore-not-found=true || true; \
 		kubectl delete pvc -n default -l app.kubernetes.io/instance=redis --ignore-not-found=true || true; \
-		echo "✅ 动态 PVC 已清理"; \
+		echo "✅ 已删 legacy 动态卷；保留 data-redis-master-0 等静态 PVC"; \
 	fi
 	@echo ""
 	@echo "=========================================="
@@ -413,7 +420,7 @@ platform-status:
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) platform-status $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
 # ─── P-step_03 Makefile 合约（L3 §7.2）────────────────────────────────────
-.PHONY: platform-step03-prep platform-step03-up platform-step03-smoke platform-step03-test-persist platform-step03-all
+.PHONY: platform-step03-prep platform-step03-up platform-step03-smoke platform-step03-test-persist platform-step03-all platform-persist-status
 
 platform-step03-prep:
 	@bash scripts/kubecm-helpers.sh ensure; \
@@ -435,6 +442,10 @@ platform-step03-smoke: platform-step03-prep
 	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
 		CONN_FILE="$(CONN_FILE)" bash scripts/platform-step03-smoke.sh
 
+platform-persist-status:
+	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
+		bash scripts/platform-persist-status.sh
+
 platform-step03-test-persist: platform-step03-prep
 	@ROUNDS=$${ROUNDS:-3} CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
 		CONN_FILE="$(CONN_FILE)" bash scripts/test-data-persistence.sh
@@ -443,12 +454,18 @@ platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-te
 	@echo "✅ [platform-step03-all] up + smoke + persist 完成"
 
 # Copilot 镜像构建推送（工作目录 diting-src）+ 升级 platform 栈内 copilot
-.PHONY: copilot-build-push copilot-smoke-url copilot-sync-smtp
+.PHONY: copilot-build-push copilot-smoke-url copilot-sync-smtp copilot-pg-deploy
 copilot-sync-smtp:
 	@bash scripts/copilot-sync-smtp-from-src-env.sh
 copilot-build-push:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	$(MAKE) -C "$$root/../diting-src" push-copilot-image DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}"
+	_tag="$${COPILOT_IMAGE_TAG:-latest}"; \
+	$(MAKE) -C "$$root/../diting-src" push-copilot-image \
+		DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}" COPILOT_IMAGE_TAG="$$_tag"
+
+copilot-pg-deploy:
+	@chmod +x scripts/copilot-ensure-pg-db.sh scripts/copilot-pg-prod-deploy.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-pg-prod-deploy.sh
 
 # step_12 · 推镜像 + 滚动重启 Copilot + tier-2 HTTP 验收（①~④）
 .PHONY: copilot-step12-deploy
@@ -501,18 +518,27 @@ copilot-modec-deploy: copilot-build-push
 	@echo "✅ [copilot-modec-deploy] 模式 C 深度研报生产部署完成"
 
 copilot-modec-verify:
-	@echo "▶ [copilot-modec-verify] 601138 真扫：校验 t2_status=ok + 9 维 + 成本（T2 读缓存）"
-	@KUBECONFIG="$(KUBECONFIG)" kubectl exec -n platform deployment/diting-copilot -- \
-		python3 -c "import json,urllib.parse,urllib.request; \
-data=urllib.parse.urlencode({'input_type':'symbol','query_text':'601138','enable_t2':'true'}).encode(); \
-req=urllib.request.Request('http://127.0.0.1:8080/api/radar/scans',data=data,method='POST'); \
-d=json.loads(urllib.request.urlopen(req,timeout=180).read()); \
-c=d['candidates'][0]; s=c.get('t2_status'); cost=(c.get('cost') or {}).get('cost_yuan'); \
-dims=(c.get('deep_analysis') or {}).get('dimensions') or {}; \
-print('t2_status=',s,'| 维度数=',len(dims),'| 成本 ¥',cost,'| cache路由=',(c.get('cost') or {}).get('route'), \
-'| 结论=',((c.get('deep_analysis') or {}).get('overall') or {}).get('conclusion')); \
-assert s=='ok', '模式 C T2 非 ok：'+str(c.get('t2_detail')); assert len(dims)==9; assert cost and float(cost)>0"
-	@echo "✅ [copilot-modec-verify] 模式 C 真扫验收通过（9 维真实内容 + 成本透出）"
+	@chmod +x scripts/copilot-modec-verify.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/copilot-modec-verify.sh
+
+# 新加坡 Anthropic 出口代理（deploy-engine · terraform-diting-sg-proxy.tfvars）
+deploy-sg-anthropic-proxy:
+	@chmod +x scripts/deploy-sg-anthropic-proxy.sh scripts/sync-anthropic-proxy-to-copilot.sh
+	@bash scripts/deploy-sg-anthropic-proxy.sh
+
+sync-anthropic-proxy-to-copilot:
+	@chmod +x scripts/sync-anthropic-proxy-to-copilot.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/sync-anthropic-proxy-to-copilot.sh
+
+deploy-anthropic-proxy-if-enabled:
+	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+	if [ "$$_en" = "true" ]; then \
+		echo "▶ [prod-up] anthropic_proxy.enabled=true → 部署新加坡代理并注入 Copilot"; \
+		$(MAKE) deploy-sg-anthropic-proxy; \
+		$(MAKE) sync-anthropic-proxy-to-copilot; \
+	else \
+		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理"; \
+	fi
 
 # 波次四：持久化 + 漏斗降级移除 + 采集数据页 + Opus 对话选模型（镜像正式部署，禁止仅热修）
 .PHONY: copilot-wave4-deploy copilot-wave4-verify

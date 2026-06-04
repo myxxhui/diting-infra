@@ -67,7 +67,7 @@ stacks = {
     k3s_role             = "agent"
     node_labels          = { "stack.diting/node" = "train", "nvidia.com/gpu" = "present" }
     enable_eip           = false
-    count                = 1
+    count                = 0
   }
   infer = {
     instance_type        = "ecs.gn6i-c4g1.xlarge"
@@ -80,6 +80,6 @@ stacks = {
     k3s_role             = "agent"
     node_labels          = { "stack.diting/node" = "infer", "nvidia.com/gpu" = "present" }
     enable_eip           = false
-    count                = 1
+    count                = 0
   }
 }

@@ -20,6 +20,8 @@ ENV="${ENV:-prod}"
 CFG="$CONFIG_ROOT/${PROJECT}-${ENV}.yaml"
 CONN_FILE="${CONN_FILE:-$INFRA_ROOT/prod.conn}"
 PORT_L1="$(yq eval '(.stack.databases.timescaledb.service.nodePort // 30001)' "$CFG")"
+STACK_NS="$(yq eval '.stack.namespace // "platform"' "$CFG")"
+REDIS_STATIC_PVC="$(yq eval '.stack.storage.redis.pvc.name // "data-redis-master-0"' "$CFG")"
 PSQL="${PSQL:-$(command -v psql 2>/dev/null || true)}"
 [ -z "$PSQL" ] && [ -x /opt/homebrew/opt/libpq/bin/psql ] && PSQL=/opt/homebrew/opt/libpq/bin/psql
 
@@ -95,6 +97,42 @@ _wait_db_ready() {
   return 1
 }
 
+_redis_marker() {
+  local action="$1" key="$2" val="${3:-}"
+  export KUBECONFIG="$HOME/.kube/config-${PROJECT}-${ENV}"
+  kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=redis,app.kubernetes.io/component=master \
+    -n "$STACK_NS" --timeout=300s 2>/dev/null || true
+  if [ "$action" = set ]; then
+    kubectl exec -n "$STACK_NS" redis-master-0 -- redis-cli SET "$key" "$val" EX 86400 >/dev/null
+  else
+    kubectl exec -n "$STACK_NS" redis-master-0 -- redis-cli GET "$key" 2>/dev/null | tr -d '\r'
+  fi
+}
+
+_wait_redis_marker() {
+  local key="$1" expect="$2" round="$3"
+  for i in $(seq 1 24); do
+    GOT="$(_redis_marker get "$key")"
+    if [ "$GOT" = "$expect" ]; then
+      echo "  D${round} Redis GET 命中 (${i}*10s) ✅"
+      return 0
+    fi
+    [ "$i" -lt 24 ] && sleep 10
+  done
+  echo "  ❌ D${round} Redis 数据丢失 key=$key"; return 1
+}
+
+_assert_static_redis_pvc() {
+  export KUBECONFIG="$HOME/.kube/config-${PROJECT}-${ENV}"
+  PHASE="$(kubectl get pvc -n "$STACK_NS" "$REDIS_STATIC_PVC" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [ "$PHASE" = "Bound" ]; then
+    echo "  Redis 静态 PVC ${REDIS_STATIC_PVC} Bound ✅"
+    return 0
+  fi
+  echo "  ❌ Redis 静态 PVC ${REDIS_STATIC_PVC} 未 Bound (phase=${PHASE:-missing})"
+  return 1
+}
+
 _wait_marker() {
   local ip="$1" marker="$2" round="$3"
   for i in $(seq 1 36); do
@@ -122,6 +160,8 @@ for round in $(seq 1 "$ROUNDS"); do
   _psql "$IP" "CREATE TABLE IF NOT EXISTS diting_persist_test (marker TEXT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now());"
   _psql "$IP" "INSERT INTO diting_persist_test (marker) VALUES ('${MARKER}') ON CONFLICT DO NOTHING;"
   echo "  INSERT marker=$MARKER ✅"
+  REDIS_KEY="persist:${MARKER}"
+  _redis_marker set "$REDIS_KEY" "$MARKER" || echo "  ⚠️ Redis SET 跳过（Pod 未就绪）"
 
   echo "  [down-stack diting-stack] ..."
   (cd "$INFRA_ROOT" && CONFIG_ROOT="$CONFIG_ROOT" make down-stack diting-stack)
@@ -144,6 +184,8 @@ for round in $(seq 1 "$ROUNDS"); do
   fi
 
   _wait_marker "$IP" "$MARKER" "$round" || exit 1
+  _assert_static_redis_pvc || exit 1
+  _wait_redis_marker "$REDIS_KEY" "$MARKER" "$round" || exit 1
 done
 
 echo ""

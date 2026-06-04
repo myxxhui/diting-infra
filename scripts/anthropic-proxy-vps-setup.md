@@ -3,6 +3,26 @@
 香港阿里云 ECS 访问 `api.anthropic.com` 返回 **403 Request not allowed**（地域封锁）。  
 A 路径（本机 `--with-t2` + `make radar-t0-sync`）可覆盖日常扫描；**B 路径**供生产缓存 miss 时 live 调 Opus。
 
+## 0. 自动化（推荐 · deploy-engine 新加坡竞价 ECS）
+
+`diting-infra/config/diting-prod.yaml` 中 `anthropic_proxy.enabled: true` 时，`make deploy diting prod` 会自动：
+
+1. `make deploy-sg-anthropic-proxy` → deploy-engine `deploy-proxy diting sg-proxy`（Terraform 新建新加坡 VPC + 竞价 ECS + 3proxy）
+2. `make sync-anthropic-proxy-to-copilot` → 写入 `diting-src/.env` 的 `HTTPS_PROXY` 并 helm 注入 Copilot
+
+独立操作：
+
+```bash
+cd diting-infra
+# 需 diting-infra/.env 中 TF_VAR_instance_password（可与 proxy 密码相同）
+make deploy-sg-anthropic-proxy
+make sync-anthropic-proxy-to-copilot
+```
+
+配置：`config/terraform-diting-sg-proxy.tfvars`（region=ap-southeast-1，stack `proxy`，`bootstrap_mode=proxy`）。
+
+**注意**：deploy-engine 子模块改动须在独立仓库 `https://github.com/myxxhui/deploy-engine.git` push 后，在本仓执行 `make update-deploy-engine`。
+
 ## 1. 租 VPS
 
 | 项 | 建议 |

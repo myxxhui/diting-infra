@@ -92,12 +92,15 @@ fi
 
 # ── 4) diting-stack PV/PVC（先不启 schema-init / module_a）────────────────
 TMP_STACK="$(mktemp)"
-yq eval '{"storage": .stack.storage, "schemaInit": (.stack.schemaInit | .enabled = false), "module_a": (.stack.module_a | .enabled = false), "ingest": .stack.ingest}' "$CFG" > "$TMP_STACK"
+yq eval '{"storage": .stack.storage, "copilot": .stack.copilot, "schemaInit": (.stack.schemaInit | .enabled = false), "module_a": (.stack.module_a | .enabled = false), "ingest": .stack.ingest}' "$CFG" > "$TMP_STACK"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
   .storage.timescaledb.pvc.namespace = \"${STACK_NS}\" |
-  .storage.postgresL2.pvc.namespace = \"${STACK_NS}\"
+  .storage.postgresL2.pvc.namespace = \"${STACK_NS}\" |
+  .storage.radarT0Cache.pvc.namespace = \"${STACK_NS}\" |
+  .storage.redis.pvc.namespace = \"${STACK_NS}\" |
+  .storage.copilotReports.pvc.namespace = \"${STACK_NS}\"
 " "$TMP_STACK"
 
 if helm list -n "$STACK_NS" 2>/dev/null | grep -q diting-stack; then
@@ -143,6 +146,11 @@ helm upgrade --install postgresql-l2 bitnami/postgresql -n "$STACK_NS" \
 
 echo "  [S2/S3] TimescaleDB + PG-L2 @ $STACK_NS ✅"
 
+# Copilot 业务库（与 L2 同 postgresql-l2 实例 · ESSD 数据盘持久）
+if [ "$(yq eval '.stack.copilot.postgres.enabled // false' "$CFG")" = "true" ]; then
+  CONFIG_ROOT="$CONFIG_ROOT" bash "$SCRIPT_DIR/copilot-ensure-pg-db.sh"
+fi
+
 # ── 5b) Redis（S2b · 当 deploy_control.enable_redis 或 stack.databases.redis.enabled）──
 ENABLE_REDIS="$(yq eval '.deploy_control.enable_redis // false' "$CFG")"
 REDIS_DB_ENABLED="$(yq eval '.stack.databases.redis.enabled // false' "$CFG")"
@@ -150,6 +158,9 @@ if [ "$ENABLE_REDIS" = "true" ] || [ "$REDIS_DB_ENABLED" = "true" ]; then
   REDIS_VALUES="$CONFIG_ROOT/redis-values-${PROJECT}-${ENV}.yaml"
   [ -f "$REDIS_VALUES" ] || REDIS_VALUES="$CONFIG_ROOT/redis-values-prod.yaml"
   if [ -f "$REDIS_VALUES" ]; then
+    if [ "$(yq eval '.stack.storage.redis.enabled // false' "$CFG")" = "true" ]; then
+      STACK_NS="$STACK_NS" bash "$SCRIPT_DIR/redis-migrate-static-pv.sh" || true
+    fi
     helm upgrade --install redis bitnami/redis -n "$STACK_NS" -f "$REDIS_VALUES" --wait --timeout=8m
     echo "  [S2b] Redis @ $STACK_NS ✅"
   else
@@ -166,7 +177,10 @@ yq eval -i "
   .module_a.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .module_a.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
   .storage.timescaledb.pvc.namespace = \"${STACK_NS}\" |
-  .storage.postgresL2.pvc.namespace = \"${STACK_NS}\"
+  .storage.postgresL2.pvc.namespace = \"${STACK_NS}\" |
+  .storage.radarT0Cache.pvc.namespace = \"${STACK_NS}\" |
+  .storage.redis.pvc.namespace = \"${STACK_NS}\" |
+  .storage.copilotReports.pvc.namespace = \"${STACK_NS}\"
 " "$TMP_FULL"
 if yq eval '.copilot.enabled // false' "$TMP_FULL" | grep -q true; then
   yq eval -i "

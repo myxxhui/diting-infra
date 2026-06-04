@@ -90,6 +90,48 @@ storage:
       accessMode: ReadWriteOnce
       storageRequest: 20Gi
 
+  # 雷达 T0 文件缓存（24h versions/）· ESSD 数据盘子路径，与 TimescaleDB 同盘
+  radarT0Cache:
+    enabled: true
+    pv:
+      name: diting-radar-t0-cache-pv
+      capacity: 20Gi
+      subPath: radar_t0_cache
+      reclaimPolicy: Retain
+    pvc:
+      name: diting-radar-t0-cache
+      namespace: default
+      accessMode: ReadWriteOnce
+      storageRequest: 20Gi
+
+  # Redis AOF/RDB · 与 L1/L2 同 ESSD hostPath Retain（ECS 复挂不丢）
+  redis:
+    enabled: false
+    pv:
+      name: diting-redis-data-pv
+      capacity: 10Gi
+      subPath: redis
+      reclaimPolicy: Retain
+    pvc:
+      name: data-redis-master-0
+      namespace: default
+      accessMode: ReadWriteOnce
+      storageRequest: 10Gi
+
+  # Copilot 月报 /data/reports · ESSD 子路径 Retain
+  copilotReports:
+    enabled: false
+    pv:
+      name: diting-copilot-reports-pv
+      capacity: 10Gi
+      subPath: copilot_reports
+      reclaimPolicy: Retain
+    pvc:
+      name: diting-copilot-reports
+      namespace: default
+      accessMode: ReadWriteOnce
+      storageRequest: 10Gi
+
 # 语义分类器-A（Module A）：连接 L1/L2 由 Secret 注入，与 ingest 同源；部署资源名 diting-semantic-classifier-a
 # 使用生产数据（非 Mock）必须：(1) timescaleHost/postgresL2Host 指向含生产数据的库（集群外库请在 config 覆盖）；(2) chart config/diting_symbols.txt 中已有标的列表（与 diting-src 一致时可执行 make sync-semantic-classifier-a-symbols 同步）
 module_a:
@@ -133,7 +175,15 @@ copilot:
   redisHost: "redis-master.default.svc.cluster.local"
   redisPort: "6379"
   redisDb: "0"
+  # 生产：postgres.enabled=true，库落在 postgresql-l2 的 ESSD 数据盘（与 L2 同实例不同库）
   dbUrl: "sqlite+aiosqlite:////data/copilot.db"
+  postgres:
+    enabled: false
+    host: postgresql-l2.platform.svc.cluster.local
+    port: 5432
+    user: postgres
+    password: postgres
+    database: diting_copilot
   alertConsumerEnabled: "true"
   ledgerSchedulerEnabled: "false"
   radarT0CacheDir: "/data/radar_t0_cache"
@@ -158,6 +208,7 @@ copilot:
     type: NodePort
     nodePort: 30080
   persistence:
+    # SQLite 时代用于 copilot.db；postgres.enabled 时应为 false，仅 emptyDir 存雷达文件缓存
     enabled: true
     storageClass: local-path
     accessMode: ReadWriteOnce

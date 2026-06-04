@@ -9,7 +9,11 @@ master:
   persistence:
     enabled: true
     size: 10Gi
-    storageClass: local-path
+    storageClass: ""
+    existingClaim: data-redis-master-0
+
+replica:
+  replicaCount: 0
   service:
     type: NodePort
     nodePorts:

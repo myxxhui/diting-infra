@@ -40,6 +40,21 @@ spec:
           chmod 777 {{ .Values.storage.dataPath }}/{{ .Values.storage.postgresL2.pv.subPath }}
           echo "✓ PostgreSQL L2 存储目录已初始化"
           {{- end }}
+          {{- if .Values.storage.radarT0Cache.enabled }}
+          mkdir -p {{ .Values.storage.dataPath }}/{{ .Values.storage.radarT0Cache.pv.subPath }}
+          chmod 777 {{ .Values.storage.dataPath }}/{{ .Values.storage.radarT0Cache.pv.subPath }}
+          echo "✓ 雷达 T0 文件缓存目录已初始化"
+          {{- end }}
+          {{- if .Values.storage.redis.enabled }}
+          mkdir -p {{ .Values.storage.dataPath }}/{{ .Values.storage.redis.pv.subPath }}
+          chmod 777 {{ .Values.storage.dataPath }}/{{ .Values.storage.redis.pv.subPath }}
+          echo "✓ Redis 数据目录已初始化"
+          {{- end }}
+          {{- if and .Values.copilot.enabled .Values.storage.copilotReports.enabled }}
+          mkdir -p {{ .Values.storage.dataPath }}/{{ .Values.storage.copilotReports.pv.subPath }}
+          chmod 777 {{ .Values.storage.dataPath }}/{{ .Values.storage.copilotReports.pv.subPath }}
+          echo "✓ Copilot 月报目录已初始化"
+          {{- end }}
           echo "✓ 所有存储目录初始化完成"
         volumeMounts:
         - name: host-root

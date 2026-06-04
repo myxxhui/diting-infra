@@ -35,6 +35,17 @@ spec:
           echo "等待 Redis..."
           until nc -z {{ .Values.copilot.redisHost }} {{ .Values.copilot.redisPort }}; do sleep 2; done
           echo "Redis 就绪"
+      {{- if .Values.copilot.postgres.enabled }}
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "等待 PostgreSQL {{ .Values.copilot.postgres.host }}..."
+          until nc -z {{ .Values.copilot.postgres.host }} {{ .Values.copilot.postgres.port }}; do sleep 2; done
+          echo "PostgreSQL 端口就绪"
+      {{- end }}
       containers:
       - name: copilot
         image: "{{ .Values.copilot.image.repository }}:{{ .Values.copilot.image.tag }}"
@@ -83,8 +94,21 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         volumeMounts:
+        {{- if .Values.storage.radarT0Cache.enabled }}
+        - name: radar-t0-cache
+          mountPath: /data/radar_t0_cache
+        {{- end }}
+        {{- if .Values.storage.copilotReports.enabled }}
+        - name: copilot-reports
+          mountPath: /data/reports
+        {{- else if not .Values.storage.radarT0Cache.enabled }}
         - name: copilot-data
           mountPath: /data
+        {{- end }}
+        {{- if and .Values.storage.radarT0Cache.enabled (not .Values.storage.copilotReports.enabled) }}
+        - name: copilot-reports-empty
+          mountPath: /data/reports
+        {{- end }}
         {{- if .Values.copilot.holdingsYaml }}
         - name: holdings-config
           mountPath: /config
@@ -94,6 +118,19 @@ spec:
         resources: {{- toYaml . | nindent 10 }}
         {{- end }}
       volumes:
+      {{- if .Values.storage.radarT0Cache.enabled }}
+      - name: radar-t0-cache
+        persistentVolumeClaim:
+          claimName: {{ .Values.storage.radarT0Cache.pvc.name }}
+      {{- end }}
+      {{- if .Values.storage.copilotReports.enabled }}
+      - name: copilot-reports
+        persistentVolumeClaim:
+          claimName: {{ .Values.storage.copilotReports.pvc.name }}
+      {{- else if .Values.storage.radarT0Cache.enabled }}
+      - name: copilot-reports-empty
+        emptyDir: {}
+      {{- else }}
       - name: copilot-data
         {{- if .Values.copilot.persistence.enabled }}
         persistentVolumeClaim:
@@ -101,6 +138,7 @@ spec:
         {{- else }}
         emptyDir: {}
         {{- end }}
+      {{- end }}
       {{- if .Values.copilot.holdingsYaml }}
       - name: holdings-config
         secret:

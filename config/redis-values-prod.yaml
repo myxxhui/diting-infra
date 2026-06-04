@@ -1,9 +1,9 @@
 # ==============================================================================
 # Redis Chart 部署覆盖（prod）
 # ==============================================================================
-# 通过本文件覆盖 Bitnami Redis Chart 的 values，控制服务暴露方式等；Makefile 仅使用
-# -f config/redis-values-prod.yaml 部署，不在此写死任何值。修改暴露方式/端口时只改本文件。
-# Bitnami Chart 要求 master.service.nodePorts.redis 为 string 类型。
+# Master 绑定 diting-stack 预创建的静态 PVC data-redis-master-0（ESSD hostPath Retain）。
+# 禁止 local-path：常规 make down/up 复挂数据盘时 local-path 卷会随节点重建丢失。
+# Bitnami Chart：master.service.nodePorts.redis 须为 string；replica 关闭以免额外动态卷。
 # ==============================================================================
 
 auth:
@@ -13,11 +13,15 @@ master:
   persistence:
     enabled: true
     size: 10Gi
-    storageClass: local-path
+    storageClass: ""
+    existingClaim: data-redis-master-0
   service:
     type: NodePort
     nodePorts:
       redis: "30379"
+
+replica:
+  replicaCount: 0
 
 volumePermissions:
   enabled: true

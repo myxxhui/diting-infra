@@ -1,0 +1,26 @@
+{{- if .Values.storage.radarT0Cache.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.storage.radarT0Cache.pv.name }}
+  labels:
+    app: diting
+    component: radar-t0-cache
+    type: static-storage
+spec:
+  capacity:
+    storage: {{ .Values.storage.radarT0Cache.pv.capacity }}
+  accessModes:
+    - {{ .Values.storage.radarT0Cache.pvc.accessMode }}
+  persistentVolumeReclaimPolicy: {{ .Values.storage.radarT0Cache.pv.reclaimPolicy }}
+  storageClassName: ""
+  hostPath:
+    path: {{ .Values.storage.dataPath }}/{{ .Values.storage.radarT0Cache.pv.subPath }}
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: Exists
+{{- end }}

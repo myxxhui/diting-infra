@@ -4,7 +4,7 @@
 
 本 Chart **只负责**为数据继承创建**静态 PV/PVC** 及**存储目录初始化 Job**，不部署数据库 workload。
 
-- **存储**：TimescaleDB、PostgreSQL L2 使用的固定路径 PV/PVC（`ReclaimPolicy: Retain`），便于 Down 后再次 Up 挂载同盘、数据继承。
+- **存储**：TimescaleDB、PostgreSQL L2、Redis、雷达 T0 缓存、Copilot 月报等使用的固定 hostPath PV/PVC（`ReclaimPolicy: Retain`），便于 Down 后再次 Up 挂载同盘、数据继承。
 - **数据库**：由 `scripts/deploy-stack.sh` 使用**官方 Bitnami Chart**（`bitnami/postgresql`、`bitnami/redis`）部署，并引用本 Chart 创建的 PVC（`existingClaim`）。
 
 ## 目录结构

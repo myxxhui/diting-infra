@@ -1,0 +1,19 @@
+{{- if .Values.storage.radarT0Cache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.radarT0Cache.pvc.name }}
+  namespace: {{ .Values.storage.radarT0Cache.pvc.namespace | default .Release.Namespace }}
+  labels:
+    app: diting
+    component: radar-t0-cache
+    type: static-storage
+spec:
+  accessModes:
+    - {{ .Values.storage.radarT0Cache.pvc.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.radarT0Cache.pvc.storageRequest }}
+  storageClassName: ""
+  volumeName: {{ .Values.storage.radarT0Cache.pv.name }}
+{{- end }}

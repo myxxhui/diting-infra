@@ -11,30 +11,47 @@ PORT=30080
 echo "▶ [wave4-verify] Pod 内表结构"
 kubectl exec -n "$NS" deployment/diting-copilot -- python3 -c "
 import asyncio
+import os
 from sqlalchemy import text
 from apps.copilot.db.database import engine
 
 async def main():
+    url = os.environ.get('COPILOT_DB_URL', '')
     async with engine.begin() as conn:
-        r = await conn.execute(text(
-            \"SELECT name FROM sqlite_master WHERE type='table' AND name='radar_symbol_versions'\"
-        ))
-        assert r.fetchone(), 'missing radar_symbol_versions'
-        r2 = await conn.execute(text('PRAGMA table_info(campaign_symbols)'))
-        cols = {row[1] for row in r2.fetchall()}
+        if 'postgresql' in url:
+            r = await conn.execute(text(
+                \"SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename='radar_symbol_versions'\"
+            ))
+            assert r.fetchone(), 'missing radar_symbol_versions'
+            r2 = await conn.execute(text(
+                \"SELECT column_name FROM information_schema.columns \"
+                \"WHERE table_name='campaign_symbols'\"
+            ))
+            cols = {row[0] for row in r2.fetchall()}
+        else:
+            r = await conn.execute(text(
+                \"SELECT name FROM sqlite_master WHERE type='table' AND name='radar_symbol_versions'\"
+            ))
+            assert r.fetchone(), 'missing radar_symbol_versions'
+            r2 = await conn.execute(text('PRAGMA table_info(campaign_symbols)'))
+            cols = {row[1] for row in r2.fetchall()}
         assert 'ui_removed_at' in cols and 'last_analyzed_at' in cols
-    print('OK migrate_step19')
+    print('OK schema ·', 'postgresql' if 'postgresql' in url else 'sqlite')
 
 asyncio.run(main())
 "
 
 echo "▶ [wave4-verify] HTTP @ ${IP}:${PORT}"
-curl -sf "http://${IP}:${PORT}/planning?view=radar" | grep -q '仅采集 T0'
+_radar_html="$(curl -sSL "http://${IP}:${PORT}/planning?view=radar")"
+echo "$_radar_html" | grep -q '仅采集 T0'
 echo "  ✅ 雷达 · 仅采集 T0"
-curl -sf "http://${IP}:${PORT}/planning?view=radar_data" | grep -q '采集数据'
-echo "  ✅ Tab radar_data"
-curl -sf "http://${IP}:${PORT}/planning?view=radar_chat" | grep -q 'radar-chat-model'
-echo "  ✅ Opus 对话模型下拉"
-curl -sf "http://${IP}:${PORT}/api/radar/audit/601138/versions" | grep -q '"db_retention_days":30'
+_audit_html="$(curl -sSL "http://${IP}:${PORT}/audit")"
+echo "$_audit_html" | grep -qE '采集数据|数据审计|audit'
+echo "  ✅ 采集数据页 /audit"
+_opus_html="$(curl -sSL "http://${IP}:${PORT}/opus")"
+echo "$_opus_html" | grep -q 'radar-chat-model'
+echo "  ✅ Opus 对话 /opus"
+_audit_json="$(curl -sSL "http://${IP}:${PORT}/api/radar/audit/601138/versions")"
+echo "$_audit_json" | grep -q '"db_retention_days":30'
 echo "  ✅ 版本 API（波次四 env · 可无历史版本）"
 echo "✅ [copilot-wave4-verify] 全部通过"

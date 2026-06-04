@@ -12,6 +12,14 @@ global:
       domain: "k3s-diting-prod.example.com"
 
 # deploy-engine 用：不在此处部署数据库，由 deploy-stack.sh 用官方 Chart 部署
+# 新加坡 Anthropic 出口代理（香港 ECS 403 时 · deploy-engine env=sg-proxy）
+anthropic_proxy:
+  enabled: true
+  deploy_engine_env: sg-proxy
+  stack_id: proxy
+  port: 3128
+  user: ditingproxy
+
 deploy_control:
   enable_timescaledb: true
   enable_postgres_l2: true
@@ -23,9 +31,10 @@ deploy_control:
   postgres_l2_storage:
     size: "20Gi"
     storage_class: "local-path"
+  # prod 实际由 stack.storage.redis 静态 PV + redis-values-prod.yaml existingClaim 绑定
   redis_storage:
     size: "10Gi"
-    storage_class: "local-path"
+    storage_class: ""
 
 # Diting Stack：1) 静态存储 Chart  2) 数据库由脚本用官方 Chart 部署
 stack:
@@ -61,6 +70,45 @@ stack:
         namespace: platform
         accessMode: ReadWriteOnce
         storageRequest: 20Gi
+    # 雷达 T0 文件缓存 · ESSD 数据盘 hostPath（与 L1/L2 同盘，ECS 复挂不丢）
+    radarT0Cache:
+      enabled: true
+      pv:
+        name: diting-radar-t0-cache-pv
+        capacity: 20Gi
+        subPath: radar_t0_cache
+        reclaimPolicy: Retain
+      pvc:
+        name: diting-radar-t0-cache
+        namespace: platform
+        accessMode: ReadWriteOnce
+        storageRequest: 20Gi
+    # Redis · 静态 PV Retain（禁止 local-path，否则 make down/up 丢会话/队列缓存）
+    redis:
+      enabled: true
+      pv:
+        name: diting-redis-data-pv
+        capacity: 10Gi
+        subPath: redis
+        reclaimPolicy: Retain
+      pvc:
+        name: data-redis-master-0
+        namespace: platform
+        accessMode: ReadWriteOnce
+        storageRequest: 10Gi
+    # Copilot 月报 /data/reports · 同盘子路径 Retain
+    copilotReports:
+      enabled: true
+      pv:
+        name: diting-copilot-reports-pv
+        capacity: 10Gi
+        subPath: copilot_reports
+        reclaimPolicy: Retain
+      pvc:
+        name: diting-copilot-reports
+        namespace: platform
+        accessMode: ReadWriteOnce
+        storageRequest: 10Gi
 
   # 采集 Job（云原生）：集群内跑 diting-ingest 镜像，启用后不再依赖 REPO_I_ROOT
   # 详见 docs/ingest-cloud-native.md；镜像来自项目 ACR，本地构建后 make push-images 推送。
@@ -112,8 +160,19 @@ stack:
     enabled: true
     image:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
-      tag: latest
+      # 由 make copilot-pg-deploy 写入 git sha；:latest 同步推送
+      tag: e1a49500
       pullPolicy: Always
+    # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
+    postgres:
+      enabled: true
+      host: postgresql-l2.platform.svc.cluster.local
+      port: 5432
+      user: postgres
+      password: postgres
+      database: diting_copilot
+    persistence:
+      enabled: false
     imagePullSecrets: ["acr-titan"]
     redisHost: "redis-master.platform.svc.cluster.local"
     redisPort: "6379"
@@ -122,9 +181,11 @@ stack:
     # copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入（密钥不入库）
     ai:
       radarT2Enabled: "true"
-      lighthouseModel: "claude-opus-4-6"
-      anthropicModel: "claude-opus-4-6"
+      lighthouseModel: "claude-opus-4-8"
+      anthropicModel: "claude-opus-4-8"
       anthropicBaseUrl: "https://api.anthropic.com"
+      # deepseekApiKey / radarT1Mode 由 copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入
+      radarT1Mode: "auto"
     radarT0CacheDir: "/data/radar_t0_cache"
     # 波次四：文件缓存 24h · DB 30 天 · 7 版/标的 · 候选区近 7 日
     radarT0CacheMaxAgeHours: "24"

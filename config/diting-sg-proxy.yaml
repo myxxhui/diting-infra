@@ -1,0 +1,12 @@
+# deploy-engine 最小配置（sg-proxy · 仅 Terraform 读 global/registry）
+global:
+  project_name: "diting"
+  environment: "sg-proxy"
+  owner: "platform-team"
+  k3s:
+    apiServer:
+      domain: "k3s-diting-sg-proxy.example.com"
+
+registry:
+  server: "crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com"
+  namespace: "titan-core"

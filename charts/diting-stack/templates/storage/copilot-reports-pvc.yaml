@@ -1,0 +1,19 @@
+{{- if and .Values.copilot.enabled .Values.storage.copilotReports.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.copilotReports.pvc.name }}
+  namespace: {{ .Values.storage.copilotReports.pvc.namespace | default .Release.Namespace }}
+  labels:
+    app: diting
+    component: copilot-reports
+    type: static-storage
+spec:
+  accessModes:
+    - {{ .Values.storage.copilotReports.pvc.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.copilotReports.pvc.storageRequest }}
+  storageClassName: ""
+  volumeName: {{ .Values.storage.copilotReports.pv.name }}
+{{- end }}
