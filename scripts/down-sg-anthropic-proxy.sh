@@ -18,7 +18,7 @@ fi
 export CONFIG_ROOT="$INFRA_ROOT/config"
 export TF_VAR_instance_password="${TF_VAR_instance_password:-}"
 
-echo "▶ [down-sg-anthropic-proxy] PROJECT=$PROJECT ENV=$PROXY_ENV（仅销 STACK=proxy 的 ECS+EIP，保留 VPC/SG/OSS）"
+echo "▶ [down-sg-anthropic-proxy] PROJECT=${PROJECT} ENV=${PROXY_ENV} (仅销 STACK=proxy 的 ECS+EIP，保留 VPC/SG/OSS)"
 ENV="$PROXY_ENV" make -C "$INFRA_ROOT/deploy-engine" down-proxy "$PROJECT" "$PROXY_ENV"
 
 echo "✅ [down-sg-anthropic-proxy] 新加坡代理 ECS+EIP 已回收"
