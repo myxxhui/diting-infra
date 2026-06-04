@@ -195,6 +195,78 @@ copilot:
   radarRecentAnalysisDays: "7"
   radarChatDefaultModel: "claude-opus-4-6"
   radarT0LiveFallback: "true"
+  # §2.8 T0 CronJob + bootstrap（27_ P2）
+  radarT0AkshareTimeoutSec: "12"
+  radarT0Jobs:
+    enabled: false
+    bootstrapHook: true
+    timeZone: Asia/Shanghai
+    startingDeadlineSeconds: 3600
+    cronjobs:
+      - id: sentiment-intraday
+        schedule: "*/10 9-15 * * 1-5"
+        activeDeadlineSeconds: 600
+      - id: sentiment-eod
+        schedule: "30 15 * * 1-5"
+        activeDeadlineSeconds: 600
+      - id: macro-sector-daily
+        schedule: "0 16 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: ecosystem-peer-daily
+        schedule: "0 17 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: micro-margin-daily
+        schedule: "0 9 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: micro-dragon-daily
+        schedule: "30 17 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: micro-northbound-daily
+        schedule: "0 18 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: risk-regulatory-daily
+        schedule: "0 20 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: consensus-weekly
+        schedule: "0 10 * * 6"
+        activeDeadlineSeconds: 3600
+      - id: risk-pledge-unlock-weekly
+        schedule: "0 8 * * 6"
+        activeDeadlineSeconds: 3600
+      - id: ecosystem-profile-monthly
+        schedule: "0 2 1 * *"
+        activeDeadlineSeconds: 3600
+      - id: ecosystem-segments-quarterly
+        schedule: "0 3 1 5,9,11 *"
+        activeDeadlineSeconds: 3600
+      - id: ecosystem-supply-chain-annual
+        schedule: "0 4 10 5 *"
+        activeDeadlineSeconds: 3600
+      - id: risk-financials-quarterly
+        schedule: "0 5 1 5,9,11 *"
+        activeDeadlineSeconds: 3600
+      - id: bars-reconcile-daily
+        schedule: "0 19 * * 1-5"
+        activeDeadlineSeconds: 1800
+  # 28_ 执行中工作区 T0 CronJob + bootstrap
+  executingT0Jobs:
+    enabled: false
+    bootstrapHook: true
+    timeZone: Asia/Shanghai
+    startingDeadlineSeconds: 3600
+    cronjobs:
+      - id: quote-intraday
+        schedule: "*/5 9-15 * * 1-5"
+        activeDeadlineSeconds: 600
+      - id: l4-micro-eod
+        schedule: "10 16 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: l3-news-daily
+        schedule: "0 18 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: daily-pipeline
+        schedule: "45 18 * * 1-5"
+        activeDeadlineSeconds: 3600
   smtp:
     enabled: false
     host: ""
@@ -217,8 +289,8 @@ copilot:
   holdingsYaml: ""
   resources:
     requests:
-      memory: "256Mi"
+      memory: "512Mi"
       cpu: "100m"
     limits:
-      memory: "768Mi"
+      memory: "1536Mi"
       cpu: "500m"

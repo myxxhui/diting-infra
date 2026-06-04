@@ -1,0 +1,34 @@
+{{- if and .Values.copilot.enabled .Values.copilot.radarT0Jobs.enabled }}
+{{- range .Values.copilot.radarT0Jobs.cronjobs }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: radar-t0-{{ .id }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: diting
+    component: radar-t0
+    radar-t0-job-id: {{ .id | quote }}
+spec:
+  schedule: {{ .schedule | quote }}
+  timeZone: {{ $.Values.copilot.radarT0Jobs.timeZone | default "Asia/Shanghai" | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ $.Values.copilot.radarT0Jobs.startingDeadlineSeconds | default 3600 }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .activeDeadlineSeconds | default 1800 }}
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: diting
+            component: radar-t0
+            radar-t0-job-id: {{ .id | quote }}
+        spec:
+          {{- include "diting.radarT0JobPod" (list $ .id (.activeDeadlineSeconds | default 1800)) | nindent 10 }}
+{{- end }}
+{{- end }}

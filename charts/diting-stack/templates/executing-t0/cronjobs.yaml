@@ -1,0 +1,27 @@
+{{- if and .Values.copilot.enabled .Values.copilot.executingT0Jobs.enabled }}
+{{- range .Values.copilot.executingT0Jobs.cronjobs }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: executing-t0-{{ .id }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: diting
+    component: executing-t0
+spec:
+  schedule: {{ .schedule | quote }}
+  timeZone: {{ $.Values.copilot.executingT0Jobs.timeZone | default "Asia/Shanghai" | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ $.Values.copilot.executingT0Jobs.startingDeadlineSeconds | default 3600 }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .activeDeadlineSeconds | default 1800 }}
+      backoffLimit: 2
+      template:
+        spec:
+          {{- include "diting.executingT0JobPod" (list $ .id (.activeDeadlineSeconds | default 1800)) | nindent 10 }}
+{{- end }}
+{{- end }}

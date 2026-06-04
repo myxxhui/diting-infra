@@ -606,6 +606,47 @@ radar-t0-collect-prod:
 	@chmod +x scripts/radar-t0-collect-prod.sh
 	@KUBECONFIG="$(KUBECONFIG)" bash scripts/radar-t0-collect-prod.sh
 
+.PHONY: radar-t0-cron-install radar-t0-bootstrap-sync radar-t0-job-status
+radar-t0-cron-install: copilot-helm-upgrade
+	@echo "✅ [radar-t0-cron-install] Helm 已含 §2.8 CronJob（copilot.radarT0Jobs.enabled=true）"
+
+radar-t0-bootstrap-sync:
+	@chmod +x scripts/radar-t0-bootstrap-sync.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/radar-t0-bootstrap-sync.sh
+
+radar-t0-job-status:
+	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
+		python -m apps.copilot.jobs.radar_t0 --status
+
+# 28_ 执行中工作区 · T0 Cron + bootstrap
+.PHONY: executing-t0-cron-install executing-t0-bootstrap-sync executing-t0-job-status
+.PHONY: copilot-executing-workspace-deploy
+
+executing-t0-cron-install: copilot-helm-upgrade
+	@echo "✅ [executing-t0-cron-install] Helm 已含 copilot.executingT0Jobs（见 diting-prod.yaml）"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform get cronjob -l component=executing-t0 2>/dev/null || \
+	  echo "⚠️  尚无 executing-t0 CronJob · 确认 executingT0Jobs.enabled=true"
+
+executing-t0-bootstrap-sync:
+	@chmod +x scripts/executing-t0-bootstrap-sync.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/executing-t0-bootstrap-sync.sh
+
+executing-t0-job-status:
+	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
+		python -m apps.copilot.jobs.executing_t0 --status
+
+copilot-executing-workspace-deploy: copilot-deploy-fast
+	@echo "▶ [copilot-executing-workspace-deploy] Pod 内 migrate + 导入持仓（失败时见 rollout 内存 limit≥1536Mi）"
+	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform rollout status deployment/diting-copilot -n platform --timeout=300s
+	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
+		python -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ executing migrate ok')" \
+		|| (echo "⚠️  migrate exec 失败(常见137 OOM) · 可改由 executing-t0-bootstrap-sync Job 补跑" && false)
+	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
+		python scripts/executing_import_positions.py || true
+	@$(MAKE) executing-t0-cron-install
+	@chmod +x scripts/copilot-executing-tier2-verify-k8s.sh
+	@EXECUTING_SYMBOL="$${EXECUTING_SYMBOL:-601138}" bash scripts/copilot-executing-tier2-verify-k8s.sh
+
 .PHONY: copilot-step17-deploy
 copilot-step17-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-step17-deploy] rollout restart diting-copilot @ platform · step17 执行仓位指导验收"

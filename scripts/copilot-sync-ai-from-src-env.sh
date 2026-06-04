@@ -18,7 +18,21 @@ _COPILOT_TAG="${COPILOT_IMAGE_TAG:-$(yq eval '.stack.copilot.image.tag // "lates
 _PG_ENABLED="$(yq eval '.stack.copilot.postgres.enabled // false' "$CFG")"
 _PG_PERSIST="$(yq eval '.stack.copilot.persistence.enabled // false' "$CFG")"
 TMP="$(mktemp)"
+CHART_VALUES="$INFRA_ROOT/charts/diting-stack/values.yaml"
 yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP"
+# radarT0Jobs：prod 可覆盖 enabled/bootstrapHook；cron 表默认来自 chart values.yaml
+yq eval -i '
+  .copilot.radarT0Jobs = (
+    (load("'"$CHART_VALUES"'").copilot.radarT0Jobs // {}) *
+    (.copilot.radarT0Jobs // {})
+  )
+' "$TMP"
+yq eval -i '
+  .copilot.executingT0Jobs = (
+    (load("'"$CHART_VALUES"'").copilot.executingT0Jobs // {}) *
+    (.copilot.executingT0Jobs // {})
+  )
+' "$TMP"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
@@ -30,6 +44,7 @@ yq eval -i "
   .copilot.redisPort = \"6379\" |
   .copilot.redisDb = \"0\" |
   .copilot.ai.radarT2Enabled = \"${RADAR_T2_ENABLED:-true}\" |
+  .copilot.ai.executingT2Enabled = \"${EXECUTING_T2_ENABLED:-${RADAR_T2_ENABLED:-true}}\" |
   .copilot.ai.lighthouseModel = \"${LIGHTHOUSE_REMOTE_MODEL:-claude-opus-4-6}\" |
   .copilot.ai.anthropicModel = \"${ANTHROPIC_MODEL:-claude-opus-4-6}\" |
   .copilot.ai.anthropicBaseUrl = \"${ANTHROPIC_BASE_URL:-https://api.anthropic.com}\" |
