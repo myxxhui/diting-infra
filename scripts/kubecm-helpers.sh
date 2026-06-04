@@ -33,13 +33,22 @@ context_name() {
   echo "${project}-${env}"
 }
 
+_ensure_kubecm_clear_trap() {
+  trap - RETURN 2>/dev/null || true
+  if [ -n "${_kubecm_tmpdir:-}" ] && [ -d "$_kubecm_tmpdir" ]; then
+    rm -rf "$_kubecm_tmpdir"
+  fi
+  unset _kubecm_tmpdir
+}
+
 ensure_kubecm() {
+  trap - RETURN 2>/dev/null || true
   if command -v kubecm >/dev/null 2>&1; then
     log "已安装 $(kubecm version 2>/dev/null | head -1 || kubecm version)"
     return 0
   fi
   log "未检测到 kubecm，开始安装…"
-  local os arch ver url tmpdir bin install_dir
+  local os arch ver url bin install_dir
   os=$(uname -s | tr '[:upper:]' '[:lower:]')
   case "$(uname -m)" in
     x86_64|amd64) arch=amd64 ;;
@@ -68,17 +77,22 @@ ensure_kubecm() {
   if [ -n "$ver" ]; then
     asset="kubecm_v${ver}_${goos}_${goarch}.tar.gz"
     url="https://github.com/sunny0826/kubecm/releases/download/v${ver}/${asset}"
-    tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' RETURN
+    _kubecm_tmpdir=$(mktemp -d)
+    trap '_ensure_kubecm_clear_trap' RETURN
     log "下载 $url"
-    if curl -fsSL "$url" | tar -xz -C "$tmpdir"; then
-      bin=$(find "$tmpdir" -name kubecm -type f | head -1)
+    if curl -fsSL "$url" | tar -xz -C "$_kubecm_tmpdir"; then
+      bin=$(find "$_kubecm_tmpdir" -name kubecm -type f | head -1)
       if [ -n "$bin" ]; then
         install -m 0755 "$bin" "$install_dir/kubecm"
         export PATH="$install_dir:$HOME/.local/bin:/usr/local/bin:$PATH"
-        command -v kubecm >/dev/null 2>&1 && { log "✅ kubecm v${ver} 安装完成 → $install_dir/kubecm"; return 0; }
+        if command -v kubecm >/dev/null 2>&1; then
+          _ensure_kubecm_clear_trap
+          log "✅ kubecm v${ver} 安装完成 → $install_dir/kubecm"
+          return 0
+        fi
       fi
     fi
+    _ensure_kubecm_clear_trap
     warn "release 下载失败: $url"
   fi
   if command -v go >/dev/null 2>&1; then

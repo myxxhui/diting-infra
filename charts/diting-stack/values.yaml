@@ -138,6 +138,12 @@ copilot:
   ledgerSchedulerEnabled: "false"
   radarT0CacheDir: "/data/radar_t0_cache"
   radarT0CacheMaxAgeHours: "24"
+  radarT0RetentionDays: "1"
+  radarFileRetentionHours: "24"
+  radarDbRetentionDays: "30"
+  radarDbMaxVersions: "7"
+  radarRecentAnalysisDays: "7"
+  radarChatDefaultModel: "claude-opus-4-6"
   radarT0LiveFallback: "true"
   smtp:
     enabled: false

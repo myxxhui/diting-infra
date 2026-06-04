@@ -56,6 +56,18 @@ spec:
           value: {{ .Values.copilot.radarT0CacheDir | default "/data/radar_t0_cache" | quote }}
         - name: RADAR_T0_CACHE_MAX_AGE_HOURS
           value: {{ .Values.copilot.radarT0CacheMaxAgeHours | default "24" | quote }}
+        - name: RADAR_T0_RETENTION_DAYS
+          value: {{ .Values.copilot.radarT0RetentionDays | default "1" | quote }}
+        - name: RADAR_FILE_RETENTION_HOURS
+          value: {{ .Values.copilot.radarFileRetentionHours | default "24" | quote }}
+        - name: RADAR_DB_RETENTION_DAYS
+          value: {{ .Values.copilot.radarDbRetentionDays | default "30" | quote }}
+        - name: RADAR_DB_MAX_VERSIONS
+          value: {{ .Values.copilot.radarDbMaxVersions | default "7" | quote }}
+        - name: RADAR_RECENT_ANALYSIS_DAYS
+          value: {{ .Values.copilot.radarRecentAnalysisDays | default "7" | quote }}
+        - name: RADAR_CHAT_DEFAULT_MODEL
+          value: {{ .Values.copilot.radarChatDefaultModel | default "claude-opus-4-6" | quote }}
         - name: RADAR_T0_LIVE_FALLBACK
           value: {{ .Values.copilot.radarT0LiveFallback | default "false" | quote }}
         livenessProbe:

@@ -231,7 +231,7 @@ prod-sync-conn-secret:
 	export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	STACK_NS="$$STACK_NS" scripts/prod-sync-conn-secret.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
-# 在远程 K3s 部署并运行采集 Job（charts/ingest 含 pre-install hook 自动执行 schema-init；Secret 由 prod-sync-conn-secret 提供）
+# 在远程 K3s 部署并运行采集 Job（helm upgrade diting-stack · ingest.enabled；Secret 由 prod-sync-conn-secret 提供）
 # 用法: make deploy-ingest-job [WAIT=wait] [INGEST_TARGET=ingest-test-real|ingest-production]
 # 步骤 3/7 默认 ingest-test-real；步骤 8 全量采集: make deploy-ingest-job INGEST_TARGET=ingest-production WAIT=wait
 # 支持 INGEST_IMAGE 覆盖（如已推送至 registry：INGEST_IMAGE=registry.cn-hongkong.aliyuncs.com/ns/diting-ingest:test）
@@ -514,10 +514,30 @@ print('t2_status=',s,'| 维度数=',len(dims),'| 成本 ¥',cost,'| cache路由=
 assert s=='ok', '模式 C T2 非 ok：'+str(c.get('t2_detail')); assert len(dims)==9; assert cost and float(cost)>0"
 	@echo "✅ [copilot-modec-verify] 模式 C 真扫验收通过（9 维真实内容 + 成本透出）"
 
-.PHONY: radar-t0-sync
+# 波次四：持久化 + 漏斗降级移除 + 采集数据页 + Opus 对话选模型（镜像正式部署，禁止仅热修）
+.PHONY: copilot-wave4-deploy copilot-wave4-verify
+copilot-wave4-deploy:
+	@chmod +x scripts/copilot-wave4-prod-deploy.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/copilot-wave4-prod-deploy.sh
+
+copilot-wave4-verify:
+	@chmod +x scripts/copilot-wave4-verify.sh
+	@KUBECONFIG="$(KUBECONFIG)" CONN_FILE="$(CONN_FILE)" bash scripts/copilot-wave4-verify.sh
+
+.PHONY: copilot-radar-audit-hotfix-deploy
+copilot-radar-audit-hotfix-deploy:
+	@echo "⚠️  已弃用：请用 make copilot-wave4-deploy（镜像+Helm 正式部署）"
+	@chmod +x scripts/copilot-radar-audit-hotfix-deploy.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/copilot-radar-audit-hotfix-deploy.sh
+
+.PHONY: radar-t0-sync radar-t0-collect-prod
 radar-t0-sync:
 	@chmod +x scripts/radar-t0-sync-to-prod.sh
 	@KUBECONFIG="$(KUBECONFIG)" bash scripts/radar-t0-sync-to-prod.sh
+
+radar-t0-collect-prod:
+	@chmod +x scripts/radar-t0-collect-prod.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/radar-t0-collect-prod.sh
 
 .PHONY: copilot-step17-deploy
 copilot-step17-deploy: copilot-build-push

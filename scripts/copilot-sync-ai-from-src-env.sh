@@ -30,7 +30,14 @@ yq eval -i "
   .copilot.ai.lighthouseModel = \"${LIGHTHOUSE_REMOTE_MODEL:-claude-opus-4-6}\" |
   .copilot.ai.anthropicModel = \"${ANTHROPIC_MODEL:-claude-opus-4-6}\" |
   .copilot.ai.anthropicBaseUrl = \"${ANTHROPIC_BASE_URL:-https://api.anthropic.com}\" |
-  .copilot.ai.anthropicApiKey = \"${ANTHROPIC_API_KEY}\"
+  .copilot.ai.anthropicApiKey = \"${ANTHROPIC_API_KEY}\" |
+  .copilot.radarT0CacheMaxAgeHours = \"${RADAR_T0_CACHE_MAX_AGE_HOURS:-24}\" |
+  .copilot.radarT0RetentionDays = \"${RADAR_T0_RETENTION_DAYS:-1}\" |
+  .copilot.radarFileRetentionHours = \"${RADAR_FILE_RETENTION_HOURS:-24}\" |
+  .copilot.radarDbRetentionDays = \"${RADAR_DB_RETENTION_DAYS:-30}\" |
+  .copilot.radarDbMaxVersions = \"${RADAR_DB_MAX_VERSIONS:-7}\" |
+  .copilot.radarRecentAnalysisDays = \"${RADAR_RECENT_ANALYSIS_DAYS:-7}\" |
+  .copilot.radarChatDefaultModel = \"${RADAR_CHAT_DEFAULT_MODEL:-claude-opus-4-6}\"
 " "$TMP"
 
 # 若 .env 提供出口代理则注入（HK ECS 同时打通东财(T0) 与 Anthropic(T2)）

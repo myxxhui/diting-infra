@@ -110,7 +110,13 @@ echo "  [S1] helm diting-stack @ ${STACK_NS} (PV/PVC) OK"
 
 # ── 5) Bitnami DB（S2/S3）──────────────────────────────────────────────
 helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
-helm repo update bitnami >/dev/null 2>&1 || true
+# 国内访问 charts.bitnami.com 常 >10min 无响应；90s 超时后用本地 index 继续
+if command -v timeout >/dev/null 2>&1; then
+  timeout 90 helm repo update bitnami >/dev/null 2>&1 \
+    || echo "  ⚠️ bitnami repo update 超时/失败，使用本地 index 继续"
+else
+  helm repo update bitnami >/dev/null 2>&1 || true
+fi
 
 PORT_L1="$(yq eval '(.stack.databases.timescaledb.service.nodePort // .ports.timescaledb) // 30001' "$CFG")"
 PORT_L2="$(yq eval '(.stack.databases.postgres_l2.service.nodePort // .ports.postgres_l2) // 30002' "$CFG")"
