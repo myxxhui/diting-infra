@@ -454,51 +454,78 @@ platform-step03-test-persist: platform-step03-prep
 platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-test-persist
 	@echo "✅ [platform-step03-all] up + smoke + persist 完成"
 
-# Copilot 镜像构建推送（工作目录 diting-src）+ 升级 platform 栈内 copilot
-.PHONY: copilot-build-push copilot-smoke-url copilot-sync-smtp copilot-pg-deploy
+# Copilot 部署加速：依赖层 Dockerfile · 仅推 sha · ACR 已有则跳过构建 · CI 构建 + 本地 helm-only
+.PHONY: copilot-build-push copilot-build-push-if-needed copilot-helm-upgrade copilot-deploy-fast
+.PHONY: copilot-smoke-url copilot-sync-smtp copilot-pg-deploy
 copilot-sync-smtp:
 	@bash scripts/copilot-sync-smtp-from-src-env.sh
 copilot-build-push:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	_tag="$${COPILOT_IMAGE_TAG:-latest}"; \
+	_tag="$${COPILOT_IMAGE_TAG:-$$(git -C "$$root/../diting-src" rev-parse --short HEAD 2>/dev/null || echo latest)}"; \
 	$(MAKE) -C "$$root/../diting-src" push-copilot-image \
 		DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}" COPILOT_IMAGE_TAG="$$_tag"
 
+# ACR 已有同 tag 且未设 COPILOT_FORCE_BUILD=1 时跳过 build/push
+copilot-build-push-if-needed:
+	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
+	_tag="$${COPILOT_IMAGE_TAG:-$$(git -C "$$root/../diting-src" rev-parse --short HEAD 2>/dev/null || echo latest)}"; \
+	if [ "$${COPILOT_FORCE_BUILD:-0}" = "1" ]; then \
+	  echo "▶ [copilot] COPILOT_FORCE_BUILD=1 · 强制构建推送 $$_tag"; \
+	  $(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
+	elif bash "$$root/scripts/copilot-acr-image-exists.sh" "$$_tag"; then \
+	  echo "▶ [copilot] ACR 已有 $$_tag · 跳过构建推送"; \
+	else \
+	  echo "▶ [copilot] ACR 无 $$_tag · 构建并推送"; \
+	  $(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
+	fi
+
+# 仅 Helm + rollout（镜像已由 CI/此前 push 提供）
+copilot-helm-upgrade:
+	@chmod +x scripts/copilot-helm-upgrade.sh scripts/copilot-sync-ai-from-src-env.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" \
+	  COPILOT_IMAGE_TAG="$${COPILOT_IMAGE_TAG:-$$(git -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" rev-parse --short HEAD 2>/dev/null)}" \
+	  bash scripts/copilot-helm-upgrade.sh
+
+# 推荐日常：智能 build（如需）+ Helm；纯配置变更可 COPILOT_SKIP_BUILD=1 make copilot-deploy-fast
+copilot-deploy-fast: copilot-build-push-if-needed copilot-helm-upgrade
+	@echo "✅ [copilot-deploy-fast] 完成"
+
 copilot-pg-deploy:
-	@chmod +x scripts/copilot-ensure-pg-db.sh scripts/copilot-pg-prod-deploy.sh
+	@chmod +x scripts/copilot-ensure-pg-db.sh scripts/copilot-pg-prod-deploy.sh \
+	  scripts/copilot-acr-image-exists.sh scripts/copilot-helm-upgrade.sh
 	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-pg-prod-deploy.sh
 
 # step_12 · 推镜像 + 滚动重启 Copilot + tier-2 HTTP 验收（①~④）
 .PHONY: copilot-step12-deploy
-copilot-step12-deploy: copilot-build-push
+copilot-step12-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-step12-deploy] rollout restart diting-copilot @ platform"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
 	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step12-tier2-verify
 
 .PHONY: copilot-step14-deploy
-copilot-step14-deploy: copilot-build-push
+copilot-step14-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-step14-deploy] rollout restart diting-copilot @ platform · step14 验收"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
 	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step14-tier2-verify
 
 .PHONY: copilot-step15-deploy
-copilot-step15-deploy: copilot-build-push
+copilot-step15-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-step15-deploy] rollout restart diting-copilot @ platform · step15 验收"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
 	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step15-tier2-verify
 
 .PHONY: copilot-step16-deploy
-copilot-step16-deploy: copilot-build-push
+copilot-step16-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-step16-deploy] rollout restart diting-copilot @ platform · step16 验收"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
 	@$(MAKE) -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" copilot-step16-tier2-verify
 
 .PHONY: copilot-step17-deploy
-copilot-funnel-deploy: copilot-build-push
+copilot-funnel-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-funnel-deploy] rollout restart diting-copilot @ platform · 四区漏斗标的级重构"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
@@ -509,7 +536,7 @@ copilot-funnel-deploy: copilot-build-push
 
 # 模式 C 深度研报：推镜像 + 注入 Opus env(从 diting-src/.env) + rollout + 601138 真扫验收
 .PHONY: copilot-modec-deploy copilot-modec-verify
-copilot-modec-deploy: copilot-build-push
+copilot-modec-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-modec-deploy] 注入 ANTHROPIC_API_KEY + RADAR_T2_ENABLED 并 helm upgrade"
 	@KUBECONFIG="$(KUBECONFIG)" bash scripts/copilot-sync-ai-from-src-env.sh
 	@echo "▶ [copilot-modec-deploy] rollout restart diting-copilot @ platform · 模式 C 深度研报"
@@ -580,7 +607,7 @@ radar-t0-collect-prod:
 	@KUBECONFIG="$(KUBECONFIG)" bash scripts/radar-t0-collect-prod.sh
 
 .PHONY: copilot-step17-deploy
-copilot-step17-deploy: copilot-build-push
+copilot-step17-deploy: copilot-build-push-if-needed
 	@echo "▶ [copilot-step17-deploy] rollout restart diting-copilot @ platform · step17 执行仓位指导验收"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout restart deployment/diting-copilot -n platform
 	@KUBECONFIG="$(KUBECONFIG)" kubectl rollout status deployment/diting-copilot -n platform --timeout=300s
