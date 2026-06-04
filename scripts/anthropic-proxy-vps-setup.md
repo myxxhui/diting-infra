@@ -5,10 +5,18 @@ A 路径（本机 `--with-t2` + `make radar-t0-sync`）可覆盖日常扫描；*
 
 ## 0. 自动化（推荐 · deploy-engine 新加坡竞价 ECS）
 
-`diting-infra/config/diting-prod.yaml` 中 `anthropic_proxy.enabled: true` 时，`make deploy diting prod` 会自动：
+`diting-infra/config/diting-prod.yaml` 中 `anthropic_proxy.enabled: true` 时：
 
-1. `make deploy-sg-anthropic-proxy` → deploy-engine `deploy-proxy diting sg-proxy`（Terraform 新建新加坡 VPC + 竞价 ECS + 3proxy）
-2. `make sync-anthropic-proxy-to-copilot` → 写入 `diting-src/.env` 的 `HTTPS_PROXY` 并 helm 注入 Copilot
+**`make deploy diting prod`（一键 Up）** 自动：
+
+1. `make deploy-sg-anthropic-proxy` → deploy-engine `deploy-proxy diting sg-proxy`（ECS + EIP；VPC/SG/OSS 永驻保留）
+2. `make sync-anthropic-proxy-to-copilot` → 读 Terraform 当前公网 IP 写入 `sg-proxy.conn`、`diting-src/.env` 的 `HTTPS_PROXY`，并 helm 注入 Copilot（**EIP 变更后每次 Up 都会刷新**）
+
+**`make down diting prod`（一键 Down）** 自动：
+
+1. 卸载香港 K3s 侧 Helm/库（保留静态 PV、prod 数据盘）
+2. `make down-sg-anthropic-proxy` → deploy-engine `down-proxy diting sg-proxy`（回收代理 **ECS+EIP**）
+3. deploy-engine `down diting prod`（回收香港 **ECS+EIP**，保留数据盘）
 
 独立操作：
 
@@ -48,12 +56,10 @@ sudo ufw allow 3128/tcp
 ## 3. 写入 diting-src/.env
 
 ```bash
-HTTPS_PROXY=http://proxyuser:请替换强密码@你的VPS公网IP:3128
-HTTP_PROXY=http://proxyuser:请替换强密码@你的VPS公网IP:3128
-NO_PROXY=localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+ANTHROPIC_HTTPS_PROXY=http://proxyuser:请替换强密码@你的VPS公网IP:3128
 ```
 
-`NO_PROXY` 确保集群内 Redis/Postgres 不走代理；**Anthropic 会走 HTTPS_PROXY**。
+**勿**在 Copilot Pod 设置 `HTTPS_PROXY`：仅 `AIDispatcher` 读 `ANTHROPIC_HTTPS_PROXY` 访问 Opus；T0 akshare / DeepSeek 直连。
 
 ## 4. 同步到生产
 

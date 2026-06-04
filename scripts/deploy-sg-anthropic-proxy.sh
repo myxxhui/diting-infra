@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT="${PROJECT:-diting}"
+CFG="${CONFIG_ROOT:-$INFRA_ROOT/config}/diting-prod.yaml"
 CONN_FILE="${INFRA_ROOT}/sg-proxy.conn"
 
 if [ -f "$INFRA_ROOT/.env" ]; then
@@ -13,8 +14,8 @@ if [ -f "$INFRA_ROOT/.env" ]; then
   source "$INFRA_ROOT/.env"
   set +a
 fi
-# make 默认 ENV=dev 会覆盖；本脚本固定 sg-proxy
-ENV=sg-proxy
+# make 默认 ENV=dev 会覆盖；从 diting-prod.yaml 读取代理环境名
+ENV="$(yq eval '.anthropic_proxy.deploy_engine_env // "sg-proxy"' "$CFG")"
 export ENV
 
 [ -n "${TF_VAR_instance_password:-}" ] || {

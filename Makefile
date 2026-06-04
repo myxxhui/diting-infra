@@ -16,7 +16,7 @@ STAGE2_01_NS ?= default
 export
 
 .PHONY: update-deploy-engine deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
-.PHONY: deploy-sg-anthropic-proxy sync-anthropic-proxy-to-copilot deploy-anthropic-proxy-if-enabled
+.PHONY: deploy-sg-anthropic-proxy down-sg-anthropic-proxy sync-anthropic-proxy-to-copilot deploy-anthropic-proxy-if-enabled down-anthropic-proxy-if-enabled
 .PHONY: ensure-kubecm kubecm-add-switch kubecm-remove kubeconfig-sync kubeconfig-restore-state
 
 # 占位目标：make deploy diting prod / make down diting prod 时不被当作文件
@@ -327,9 +327,10 @@ down-diting-prod:
 			(cd "$$_TF" && terraform state rm 'module.nas.alicloud_nas_access_group.main[0]' -state=terraform.tfstate) || true; \
 		fi; \
 	fi
+	@$(MAKE) down-anthropic-proxy-if-enabled
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
-	@echo "make down diting prod OK（ECS/EIP 已回收；kubecm context 已移除；数据盘已保留，再次执行 make deploy diting prod 将挂载同盘）"
+	@echo "make down diting prod OK（香港 + 新加坡代理 ECS/EIP 已回收；kubecm 已移除；prod 数据盘与静态 PV 保留）"
 
 # ============================================================================
 # v2 多 stack（P 轨）— diting-infra 壳调 deploy-engine 新 target
@@ -523,8 +524,12 @@ copilot-modec-verify:
 
 # 新加坡 Anthropic 出口代理（deploy-engine · terraform-diting-sg-proxy.tfvars）
 deploy-sg-anthropic-proxy:
-	@chmod +x scripts/deploy-sg-anthropic-proxy.sh scripts/sync-anthropic-proxy-to-copilot.sh
+	@chmod +x scripts/deploy-sg-anthropic-proxy.sh scripts/down-sg-anthropic-proxy.sh scripts/sync-anthropic-proxy-to-copilot.sh
 	@bash scripts/deploy-sg-anthropic-proxy.sh
+
+down-sg-anthropic-proxy:
+	@chmod +x scripts/down-sg-anthropic-proxy.sh
+	@bash scripts/down-sg-anthropic-proxy.sh
 
 sync-anthropic-proxy-to-copilot:
 	@chmod +x scripts/sync-anthropic-proxy-to-copilot.sh
@@ -533,11 +538,20 @@ sync-anthropic-proxy-to-copilot:
 deploy-anthropic-proxy-if-enabled:
 	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	if [ "$$_en" = "true" ]; then \
-		echo "▶ [prod-up] anthropic_proxy.enabled=true → 部署新加坡代理并注入 Copilot"; \
+		echo "▶ [prod-up] anthropic_proxy.enabled=true → 部署新加坡代理 ECS+EIP 并同步 HTTPS_PROXY"; \
 		$(MAKE) deploy-sg-anthropic-proxy; \
 		$(MAKE) sync-anthropic-proxy-to-copilot; \
 	else \
 		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理"; \
+	fi
+
+down-anthropic-proxy-if-enabled:
+	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+	if [ "$$_en" = "true" ]; then \
+		echo "▶ [prod-down] anthropic_proxy.enabled=true → 回收新加坡代理 ECS+EIP"; \
+		$(MAKE) down-sg-anthropic-proxy; \
+	else \
+		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理 Down"; \
 	fi
 
 # 波次四：持久化 + 漏斗降级移除 + 采集数据页 + Opus 对话选模型（镜像正式部署，禁止仅热修）

@@ -52,14 +52,18 @@ _merge_env() {
   fi
 }
 
-_merge_env "HTTPS_PROXY" "$PROXY_URL" "$SRC_ENV"
-_merge_env "HTTP_PROXY" "$PROXY_URL" "$SRC_ENV"
-_merge_env "NO_PROXY" "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" "$SRC_ENV"
+_merge_env "ANTHROPIC_HTTPS_PROXY" "$PROXY_URL" "$SRC_ENV"
+# 移除进程级代理，避免 Copilot 内 akshare / DeepSeek 误走新加坡 3proxy
+for _k in HTTPS_PROXY HTTP_PROXY; do
+  if grep -q "^${_k}=" "$SRC_ENV" 2>/dev/null; then
+    sed -i "/^${_k}=/d" "$SRC_ENV"
+  fi
+done
 _merge_env "ANTHROPIC_PROXY_USER" "$PROXY_USER" "$SRC_ENV"
 _merge_env "ANTHROPIC_PROXY_HOST" "$PROXY_HOST" "$SRC_ENV"
 _merge_env "ANTHROPIC_PROXY_PORT" "$PROXY_PORT" "$SRC_ENV"
 
-echo "▶ [sync-anthropic-proxy] HTTPS_PROXY → Copilot（host=$PROXY_HOST port=$PROXY_PORT）"
+echo "▶ [sync-anthropic-proxy] ANTHROPIC_HTTPS_PROXY → Copilot（host=$PROXY_HOST port=$PROXY_PORT）"
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
 bash "$SCRIPT_DIR/copilot-sync-ai-from-src-env.sh"
 env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout restart deployment/diting-copilot -n platform 2>/dev/null || true

@@ -162,7 +162,12 @@ if [ "$ENABLE_REDIS" = "true" ] || [ "$REDIS_DB_ENABLED" = "true" ]; then
       STACK_NS="$STACK_NS" bash "$SCRIPT_DIR/redis-migrate-static-pv.sh" || true
     fi
     helm upgrade --install redis bitnami/redis -n "$STACK_NS" -f "$REDIS_VALUES" --wait --timeout=8m
-    echo "  [S2b] Redis @ $STACK_NS ✅"
+    echo "  [S2b] Redis @ $STACK_NS ✅（master 单副本 · replicaCount=0）"
+    # 早期误装在 default 的 bitnami/redis（1 master + 3 replica）占用资源，prod 仅用 platform
+    if helm list -n default -q 2>/dev/null | grep -qx 'redis'; then
+      echo "  [S2b] 卸载 default 命名空间遗留 redis（节省 3 个 replica Pod）…"
+      env -u HTTPS_PROXY -u HTTP_PROXY helm uninstall redis -n default --wait --timeout=5m || true
+    fi
   else
     echo "  [S2b] ⚠️ Redis values 缺失，跳过"
   fi

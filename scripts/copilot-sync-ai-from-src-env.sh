@@ -50,14 +50,11 @@ yq eval -i "
   .copilot.persistence.enabled = ${_PG_PERSIST}
 " "$TMP"
 
-# 若 .env 提供出口代理则注入（HK ECS 同时打通东财(T0) 与 Anthropic(T2)）
-if [ -n "${HTTPS_PROXY:-}" ]; then
-  yq eval -i "
-    .copilot.ai.httpsProxy = \"${HTTPS_PROXY}\" |
-    .copilot.ai.httpProxy = \"${HTTP_PROXY:-$HTTPS_PROXY}\" |
-    .copilot.ai.noProxy = \"${NO_PROXY:-localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}\"
-  " "$TMP"
-  echo "ℹ️  已注入出口代理 HTTPS_PROXY=${HTTPS_PROXY}"
+# 仅 Opus/Anthropic 走新加坡代理（勿注入进程级 HTTPS_PROXY，避免 akshare/DeepSeek 误走代理）
+_ANTH_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
+if [ -n "$_ANTH_PROXY" ]; then
+  yq eval -i ".copilot.ai.anthropicHttpsProxy = \"${_ANTH_PROXY}\"" "$TMP"
+  echo "ℹ️  已注入 Anthropic 专用代理 ANTHROPIC_HTTPS_PROXY（Pod 不设 HTTPS_PROXY）"
 fi
 
 # 若 .env 提供 SMTP 则一并保留（与 copilot-sync-smtp 同源，避免覆盖丢失）
@@ -75,8 +72,14 @@ if [ -n "${COPILOT_SMTP_USERNAME:-}" ] && [ -n "${COPILOT_SMTP_PASSWORD:-}" ]; t
 fi
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-# 集群 API 不得走出口代理（仅 Pod 内访问 Anthropic 需要 HTTPS_PROXY）
+# 集群 API 不得走出口代理（仅 Pod 内 Anthropic 客户端读 ANTHROPIC_HTTPS_PROXY）
 env -u HTTPS_PROXY -u HTTP_PROXY helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP" --wait --timeout=5m
 rm -f "$TMP"
+# Helm 升级 Secret 不会删除已废弃的 data 键，显式移除进程级 HTTPS_PROXY/HTTP_PROXY
+for _stale in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
+  env -u HTTPS_PROXY -u HTTP_PROXY kubectl patch secret diting-copilot-conn -n "$STACK_NS" \
+    --type=json -p="[{\"op\":\"remove\",\"path\":\"/data/${_stale}\"}]" 2>/dev/null || true
+done
+env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout restart deployment/diting-copilot -n "$STACK_NS" 2>/dev/null || true
 env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout status deployment/diting-copilot -n "$STACK_NS" --timeout=120s
 echo "✅ Copilot AI(Opus) env 已注入 · RADAR_T2_ENABLED=${RADAR_T2_ENABLED:-true} · namespace=$STACK_NS"
