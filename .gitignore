@@ -1,6 +1,6 @@
 # 本地凭证（阿里云 AK/SK、TF_VAR_instance_password、ACR 等）
-# 2026-06-05：按架构师要求 .env 纳入 Git 备份（私有仓库）；仍勿提交 prod.conn / tfvars
-# .env  ← 已允许跟踪
+# 勿提交 .env（见 .env.template）
+.env
 
 # 生产环境连接信息与数据盘 ID（含敏感信息；见 06_生产级数据要求_实践）
 prod.conn
