@@ -101,7 +101,7 @@ yq eval -i "
 " "$TMP_VALUES"
 
 # 勿 --wait：会等 Copilot/schema-init 等全就绪，易超时并锁死 pending-upgrade；采集 Job 单独 kubectl wait
-helm upgrade diting-stack "$CHART_STACK" -n "$STACK_NS" -f "$TMP_VALUES" --timeout=10m
+helm upgrade diting-stack "$CHART_STACK" -n "$STACK_NS" -f "$TMP_VALUES" --timeout=10m --no-hooks
 
 # Job 名：diting-ingest-<revision>[-<triggerRunAt>]（见 templates/ingest/job.yaml）
 JOB_NAME=""
@@ -114,12 +114,11 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   fi
   sleep 2
 done
-if [ -z "$JOB_NAME" ]; then
-  echo "⚠️ 未找到 ingest Job（label component=ingest）；请检查: kubectl get jobs -n $STACK_NS"
-  exit 1
-fi
-
 if [ "$WAIT_FOR_JOB" = "wait" ]; then
+  if [ -z "$JOB_NAME" ]; then
+    echo "错误: WAIT=wait 但未找到 ingest Job（label component=ingest）；请检查: kubectl get jobs -n $STACK_NS"
+    exit 1
+  fi
   echo "等待 Job $JOB_NAME 完成（集群内 make ingest-deploy）..."
   if kubectl wait --for=condition=complete "job/$JOB_NAME" -n "$STACK_NS" --timeout=3600s 2>/dev/null; then
     echo "✅ 采集 Job 已完成: $JOB_NAME"
@@ -128,6 +127,12 @@ if [ "$WAIT_FOR_JOB" = "wait" ]; then
     exit 1
   fi
 else
-  echo "Job 已提交: $JOB_NAME · 查看: kubectl get jobs -n $STACK_NS -l component=ingest"
-  echo "日志: kubectl logs job/$JOB_NAME -n $STACK_NS -f"
+  echo "✅ 采集 Chart 已升级（ingest.enabled=true），部署收尾不等待 Job 完成"
+  if [ -n "$JOB_NAME" ]; then
+    echo "   Job: $JOB_NAME · 状态: kubectl get job $JOB_NAME -n $STACK_NS"
+    echo "   日志: kubectl logs job/$JOB_NAME -n $STACK_NS -f"
+  else
+    echo "   ⚠️ 暂未发现 ingest Job（可能仍在创建）；请稍后: kubectl get jobs -n $STACK_NS -l component=ingest"
+  fi
+  echo "   运行与重试由 Kubernetes 监管；需阻塞验收时请: make deploy-ingest-job WAIT=wait"
 fi

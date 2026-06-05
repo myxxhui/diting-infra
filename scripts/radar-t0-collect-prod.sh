@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 生产 copilot pod 内：读 radar_t0_collect_symbols 表批量 T0 采集
+# 生产 copilot pod 内：读 load_generic_t0_collect_symbols（executing ∪ radar）批量 T0 采集
 # 用法：bash scripts/radar-t0-collect-prod.sh
 # 可选：SYMBOL=601138 仅采单只（仍会 UPSERT 入表）
 set -euo pipefail
@@ -19,7 +19,7 @@ if [ -n "${SYMBOL:-}" ]; then
     env RADAR_T0_CACHE_DIR=/data/radar_t0_cache PYTHONPATH=/app \
     python3 scripts/radar_t0_collect_once.py --symbol "$SYMBOL"
 else
-  echo "▶ 批量：collect 表 enabled 标的"
+  echo "▶ 批量：通用 T0 宇宙 enabled 标的"
   kubectl exec -n "$NS" "deployment/$DEPLOY" -- \
     env RADAR_T0_CACHE_DIR=/data/radar_t0_cache PYTHONPATH=/app \
     python3 scripts/radar_t0_collect_once.py --all

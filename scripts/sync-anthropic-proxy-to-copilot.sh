@@ -74,8 +74,19 @@ _merge_env "ANTHROPIC_PROXY_HOST" "$PROXY_HOST" "$SRC_ENV"
 _merge_env "ANTHROPIC_PROXY_PORT" "$PROXY_PORT" "$SRC_ENV"
 
 echo "▶ [sync-anthropic-proxy] ANTHROPIC_HTTPS_PROXY -> Copilot (host=${PROXY_HOST} port=${PROXY_PORT})"
-export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
+# 强制 diting-prod kubeconfig（helm 不得走 shell 里残留的 ~/.kube/config 旧 context）
+_DITING_KC="$HOME/.kube/config-diting-prod"
+[ -f "$_DITING_KC" ] || {
+  echo "错误: 缺少 $_DITING_KC，请先完成 make deploy diting prod 或 make kubeconfig-sync prod diting"
+  exit 1
+}
+export KUBECONFIG="$_DITING_KC"
+_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
+echo "ℹ️  [sync-anthropic-proxy] KUBECONFIG=$_DITING_KC server=${_SERVER:-unknown}"
+kubectl cluster-info --request-timeout=10s >/dev/null 2>&1 || {
+  echo "错误: 无法连接 diting-prod 集群（server=${_SERVER:-}）"
+  exit 1
+}
 bash "$SCRIPT_DIR/copilot-sync-ai-from-src-env.sh"
-env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout restart deployment/diting-copilot -n platform 2>/dev/null || true
-env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout status deployment/diting-copilot -n platform --timeout=180s 2>/dev/null || true
-echo "✅ [sync-anthropic-proxy] 已合并 $SRC_ENV 并 helm 注入 platform/diting-copilot"
+echo "✅ [sync-anthropic-proxy] 已合并 $SRC_ENV 并 helm 提交 platform/diting-copilot（业务第二梯队 · 不等待 Pod Ready）"
+echo "   查看: kubectl get pods -n platform -l app.kubernetes.io/name=diting-copilot"

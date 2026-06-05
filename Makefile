@@ -8,6 +8,9 @@ PROJECT ?= diting
 ENV ?= dev
 DEPLOY_ENGINE_DIR = deploy-engine
 
+# 子 make 递归时不打印 Entering/Leaving directory（避免 deploy 日志刷屏）
+MAKEFLAGS += --no-print-directory
+
 # Stage2-01 验证环境清理：无论验证是否完成都要执行，避免残留（release/namespace 与部署时一致）
 STAGE2_01_NS ?= default
 
@@ -16,7 +19,9 @@ STAGE2_01_NS ?= default
 export
 
 .PHONY: update-deploy-engine deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
-.PHONY: deploy-sg-anthropic-proxy down-sg-anthropic-proxy sync-anthropic-proxy-to-copilot deploy-anthropic-proxy-if-enabled down-anthropic-proxy-if-enabled
+.PHONY: deploy-sg-anthropic-proxy verify-sg-anthropic-proxy down-sg-anthropic-proxy sync-anthropic-proxy-to-copilot \
+	deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled \
+	deploy-anthropic-proxy-if-enabled down-anthropic-proxy-if-enabled
 .PHONY: ensure-kubecm kubecm-add-switch kubecm-remove kubeconfig-sync kubeconfig-restore-state
 
 # 占位目标：make deploy diting prod / make down diting prod 时不被当作文件
@@ -120,7 +125,7 @@ PROD_DATA_ENV_ENV     = prod
 CONN_FILE             = $(CURDIR)/prod.conn
 DISK_ID_FILE          = $(CURDIR)/prod.disk_id
 
-.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn prod-sync-conn-secret deploy-ingest-job
+.PHONY: deploy-diting-prod down-diting-prod deploy-diting-prod-with-ingest prod-write-conn prod-sync-conn-secret deploy-ingest-job prod-deploy-summary
 
 # 兼容旧命令（推荐使用 make deploy diting prod / make down diting prod）
 deploy-data-db-prod: deploy-diting-prod
@@ -153,8 +158,8 @@ deploy-diting-prod: update-deploy-engine
 			fi; \
 		fi; \
 	}
-	@if [ -f "$(DISK_ID_FILE)" ]; then \
-		export TF_VAR_use_existing_data_disk_id=$$(cat "$(DISK_ID_FILE)"); \
+	@if scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
+		export TF_VAR_use_existing_data_disk_id=$$(scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)"); \
 		(cd $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud && terraform state rm 'alicloud_disk.prod_data[0]' -state=terraform.tfstate 2>/dev/null) || true; \
 	else \
 		echo "[prod-up] 数据盘不存在，先创建数据盘..."; \
@@ -169,14 +174,14 @@ deploy-diting-prod: update-deploy-engine
 				-var=project=$(PROD_DATA_ENV_PROJECT) \
 				-var=region="$$_REGION" \
 				-var=config_file="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-		_DISK_ID=$$(cd $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud && terraform output -raw data_disk_id 2>/dev/null); \
-		if [ -n "$$_DISK_ID" ]; then \
-			echo "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
+		_DISK_ID=$$(scripts/tf-output-safe.sh data_disk_id $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud); \
+		if [ -n "$$_DISK_ID" ] && echo "$$_DISK_ID" | grep -qE '^d-[a-z0-9]+$$'; then \
+			printf '%s' "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
 			echo "[prod-up] 数据盘已创建: $$_DISK_ID"; \
 		fi; \
 	fi
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
-	@$(MAKE) deploy-anthropic-proxy-if-enabled
+	@$(MAKE) deploy-sg-anthropic-proxy-if-enabled
 	@echo ""
 	@echo "=========================================="
 	@echo "  注册 kubeconfig 到 kubecm 并切换当前 context"
@@ -188,18 +193,19 @@ deploy-diting-prod: update-deploy-engine
 	@echo "=========================================="
 	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
 		CONN_FILE="$(CONN_FILE)" bash "$(CURDIR)/scripts/platform-step03-deploy-stack.sh"
+	@$(MAKE) sync-anthropic-proxy-if-enabled
 	@$(MAKE) -f $(CURDIR)/Makefile prod-write-conn
 	@echo ""
 	@echo "=========================================="
-	@echo "  执行 Schema 初始化与数据采集（远程 K3s Job）"
+	@echo "  触发采集 Job（异步 · 不阻塞部署收尾）"
 	@echo "=========================================="
 	@INGEST_ENABLED=$$(yq eval '.data_ingestion.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	USE_K3S_JOB=$$(yq eval '.data_ingestion.use_k3s_job // true' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	if [ "$${SKIP_INGEST:-0}" = "1" ]; then \
-		echo "SKIP_INGEST=1，跳过数据采集（persist / smoke 场景）"; \
+		echo "SKIP_INGEST=1，跳过采集 Job 触发"; \
 	elif [ "$$INGEST_ENABLED" = "true" ]; then \
 		if [ "$$USE_K3S_JOB" = "true" ]; then \
-			$(MAKE) deploy-ingest-job WAIT=wait; \
+			$(MAKE) deploy-ingest-job; \
 		else \
 			CORE_REPO=$$(yq eval '.data_ingestion.core_repo_path // ""' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 			[ -z "$$CORE_REPO" ] && CORE_REPO="$${REPO_I_ROOT:-}"; \
@@ -209,19 +215,13 @@ deploy-diting-prod: update-deploy-engine
 			else echo "⚠️  core_repo_path/REPO_I_ROOT 未设置，跳过"; fi; \
 		fi; \
 	else echo "数据采集已禁用（data_ingestion.enabled=false），跳过"; fi
-	@echo ""
-	@echo "=========================================="
-	@echo "  ✅ 部署完成！"
-	@echo "=========================================="
-	@echo ""
-	@echo "kubecm 已合并 kubeconfig 并切换 context → $(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"
-	@echo "KUBECONFIG=$$HOME/.kube/config（已写入 ~/.bashrc / ~/.zshrc / ~/.profile）"
-	@echo "当前终端: export KUBECONFIG=\"$$HOME/.kube/config\" 或 source ~/.bashrc"
-	@echo "切换环境: kubecm switch <context> · 列表: kubecm ls"
-	@echo ""
-	@echo "验证: kubectl get nodes && kubectl get pods -A"
-	@echo "=========================================="
-	@echo ""
+	@$(MAKE) prod-deploy-summary
+
+# 部署收尾：业务访问地址与验收指引
+prod-deploy-summary:
+	@chmod +x scripts/prod-deploy-summary.sh
+	@KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)" \
+		scripts/prod-deploy-summary.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
 # 将连接信息写入 prod.conn（EIP 与 NodePort 从 deploy-engine 输出或 kubectl 获取）
 prod-write-conn:
@@ -235,9 +235,9 @@ prod-sync-conn-secret:
 	export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
 	STACK_NS="$$STACK_NS" scripts/prod-sync-conn-secret.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
-# 在远程 K3s 部署并运行采集 Job（helm upgrade diting-stack · ingest.enabled；Secret 由 prod-sync-conn-secret 提供）
-# 用法: make deploy-ingest-job [WAIT=wait] [INGEST_TARGET=ingest-test-real|ingest-production]
-# 步骤 3/7 默认 ingest-test-real；步骤 8 全量采集: make deploy-ingest-job INGEST_TARGET=ingest-production WAIT=wait
+# 在远程 K3s 提交采集 Job（helm upgrade diting-stack · ingest.enabled；默认不等待 Job 完成，由 K8s 监管）
+# 用法: make deploy-ingest-job [INGEST_TARGET=ingest-test-real|ingest-production]
+# 需同步等待完成（验收/phase2）: make deploy-ingest-job WAIT=wait
 # 支持 INGEST_IMAGE 覆盖（如已推送至 registry：INGEST_IMAGE=registry.cn-hongkong.aliyuncs.com/ns/diting-ingest:test）
 deploy-ingest-job: prod-sync-conn-secret
 	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; export INGEST_TARGET; export INGEST_IMAGE; \
@@ -364,8 +364,8 @@ up-stack: update-deploy-engine
 	  *) echo "未知 chart: $$_chart · 支持: diting-stack/diting-training/diting-vllm"; exit 1 ;; \
 	esac; \
 	echo "[up-stack] chart=$$_chart → stack=$$_stack"; \
-	if [ -f "$(DISK_ID_FILE)" ]; then \
-		export TF_VAR_use_existing_data_disk_id=$$(cat "$(DISK_ID_FILE)"); \
+	if scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
+		export TF_VAR_use_existing_data_disk_id=$$(scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)"); \
 		echo "[up-stack] 复用数据盘 TF_VAR_use_existing_data_disk_id=$$TF_VAR_use_existing_data_disk_id"; \
 	fi; \
 	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; \
@@ -551,8 +551,24 @@ copilot-modec-verify:
 
 # 新加坡 Anthropic 出口代理（deploy-engine · terraform-diting-sg-proxy.tfvars）
 deploy-sg-anthropic-proxy:
-	@chmod +x scripts/deploy-sg-anthropic-proxy.sh scripts/down-sg-anthropic-proxy.sh scripts/sync-anthropic-proxy-to-copilot.sh
+	@chmod +x scripts/deploy-sg-anthropic-proxy.sh scripts/down-sg-anthropic-proxy.sh \
+		scripts/sync-anthropic-proxy-to-copilot.sh scripts/sg-anthropic-proxy-helpers.sh
 	@bash scripts/deploy-sg-anthropic-proxy.sh
+
+# 仅探测新加坡代理是否可用（不创建 ECS/EIP）
+verify-sg-anthropic-proxy:
+	@chmod +x scripts/sg-anthropic-proxy-helpers.sh
+	@bash -c '\
+		source scripts/sg-anthropic-proxy-helpers.sh; \
+		INFRA="$(CURDIR)"; CONN="$$INFRA/sg-proxy.conn"; PROJ=diting; \
+		ENV=$$(yq eval ".anthropic_proxy.deploy_engine_env // \"sg-proxy\"" "$(CONFIG_ROOT)/diting-prod.yaml"); \
+		USER=$$(yq eval ".anthropic_proxy.user // \"ditingproxy\"" "$(CONFIG_ROOT)/diting-prod.yaml"); \
+		PORT=$$(yq eval ".anthropic_proxy.port // 3128" "$(CONFIG_ROOT)/diting-prod.yaml"); \
+		sg_proxy_load_env "$$INFRA"; PW=$$(sg_proxy_resolve_password "$$INFRA"); \
+		sg_proxy_resolve_endpoint "$$INFRA" $$PROJ $$ENV "$$CONN" "$$PORT" || { echo "❌ 无 proxy output/conn"; exit 1; }; \
+		sg_proxy_health_check "$$PROXY_IP" "$${PROXY_PORT:-$$PORT}" "$$USER" "$$PW" 1 1 \
+			&& echo "✅ sg-proxy 健康 ip=$$PROXY_IP port=$${PROXY_PORT:-$$PORT}" \
+			|| { echo "❌ sg-proxy 不可用 ip=$$PROXY_IP"; exit 1; }'
 
 down-sg-anthropic-proxy:
 	@chmod +x scripts/down-sg-anthropic-proxy.sh
@@ -560,17 +576,29 @@ down-sg-anthropic-proxy:
 
 sync-anthropic-proxy-to-copilot:
 	@chmod +x scripts/sync-anthropic-proxy-to-copilot.sh
-	@KUBECONFIG="$(KUBECONFIG)" bash scripts/sync-anthropic-proxy-to-copilot.sh
+	@bash scripts/sync-anthropic-proxy-to-copilot.sh
 
-deploy-anthropic-proxy-if-enabled:
+# 确保新加坡代理可用（已存在且健康则复用，不重复创建 ECS/EIP）；helm 注入在 platform-stack 之后
+deploy-sg-anthropic-proxy-if-enabled:
 	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	if [ "$$_en" = "true" ]; then \
-		echo "▶ [prod-up] anthropic_proxy.enabled=true → 部署新加坡代理 ECS+EIP 并同步 HTTPS_PROXY"; \
+		echo "▶ [prod-up] anthropic_proxy.enabled=true → 确保新加坡代理可用（健康则复用）"; \
 		$(MAKE) deploy-sg-anthropic-proxy; \
+	else \
+		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理 ECS"; \
+	fi
+
+sync-anthropic-proxy-if-enabled:
+	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+	if [ "$$_en" = "true" ]; then \
+		echo "▶ [prod-up] platform-stack 已部署 → 同步 ANTHROPIC_HTTPS_PROXY 到 Copilot"; \
 		$(MAKE) sync-anthropic-proxy-to-copilot; \
 	else \
-		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理"; \
+		echo "ℹ️  anthropic_proxy.enabled=false，跳过代理 helm 注入"; \
 	fi
+
+# 兼容旧 target 名
+deploy-anthropic-proxy-if-enabled: deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled
 
 down-anthropic-proxy-if-enabled:
 	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \

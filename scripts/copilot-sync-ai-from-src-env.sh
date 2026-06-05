@@ -17,22 +17,24 @@ set -a && source "$SRC_ENV" && set +a
 _COPILOT_TAG="${COPILOT_IMAGE_TAG:-$(yq eval '.stack.copilot.image.tag // "latest"' "$CFG")}"
 _PG_ENABLED="$(yq eval '.stack.copilot.postgres.enabled // false' "$CFG")"
 _PG_PERSIST="$(yq eval '.stack.copilot.persistence.enabled // false' "$CFG")"
-TMP="$(mktemp)"
+# 勿用 TMP：make「export」可能注入同名环境变量；trap 清理避免 rm 被遮蔽时误执行 values 文件（exit 126）
+_VALUES_FILE="$(mktemp)"
+trap '/usr/bin/rm -f "$_VALUES_FILE"' EXIT INT TERM
 CHART_VALUES="$INFRA_ROOT/charts/diting-stack/values.yaml"
-yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP"
+yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$_VALUES_FILE"
 # radarT0Jobs：prod 可覆盖 enabled/bootstrapHook；cron 表默认来自 chart values.yaml
 yq eval -i '
   .copilot.radarT0Jobs = (
     (load("'"$CHART_VALUES"'").copilot.radarT0Jobs // {}) *
     (.copilot.radarT0Jobs // {})
   )
-' "$TMP"
+' "$_VALUES_FILE"
 yq eval -i '
   .copilot.executingT0Jobs = (
     (load("'"$CHART_VALUES"'").copilot.executingT0Jobs // {}) *
     (.copilot.executingT0Jobs // {})
   )
-' "$TMP"
+' "$_VALUES_FILE"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
@@ -63,12 +65,12 @@ yq eval -i "
   .copilot.image.tag = \"${_COPILOT_TAG}\" |
   .copilot.postgres.enabled = ${_PG_ENABLED} |
   .copilot.persistence.enabled = ${_PG_PERSIST}
-" "$TMP"
+" "$_VALUES_FILE"
 
 # 仅 Opus/Anthropic 走新加坡代理（勿注入进程级 HTTPS_PROXY，避免 akshare/DeepSeek 误走代理）
 _ANTH_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
 if [ -n "$_ANTH_PROXY" ]; then
-  yq eval -i ".copilot.ai.anthropicHttpsProxy = \"${_ANTH_PROXY}\"" "$TMP"
+  yq eval -i ".copilot.ai.anthropicHttpsProxy = \"${_ANTH_PROXY}\"" "$_VALUES_FILE"
   echo "ℹ️  已注入 Anthropic 专用代理 ANTHROPIC_HTTPS_PROXY（Pod 不设 HTTPS_PROXY）"
 fi
 
@@ -83,18 +85,19 @@ if [ -n "${COPILOT_SMTP_USERNAME:-}" ] && [ -n "${COPILOT_SMTP_PASSWORD:-}" ]; t
     .copilot.smtp.password = \"${COPILOT_SMTP_PASSWORD}\" |
     .copilot.smtp.from = \"${COPILOT_SMTP_FROM:-$COPILOT_SMTP_USERNAME}\" |
     .copilot.smtp.to = \"${COPILOT_SMTP_TO:-$COPILOT_SMTP_USERNAME}\"
-  " "$TMP"
+  " "$_VALUES_FILE"
 fi
 
-export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+# prod 专用：默认 diting-prod kubeconfig，避免误用 ~/.kube/config 中过期 API（如旧 EIP 47.239.91.106）
+export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
 # 集群 API 不得走出口代理（仅 Pod 内 Anthropic 客户端读 ANTHROPIC_HTTPS_PROXY）
-env -u HTTPS_PROXY -u HTTP_PROXY helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP" --wait --timeout=5m
-rm -f "$TMP"
+env -u HTTPS_PROXY -u HTTP_PROXY helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$_VALUES_FILE" --timeout=10m --no-hooks
+trap - EXIT INT TERM
+/usr/bin/rm -f "$_VALUES_FILE"
 # Helm 升级 Secret 不会删除已废弃的 data 键，显式移除进程级 HTTPS_PROXY/HTTP_PROXY
 for _stale in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
   env -u HTTPS_PROXY -u HTTP_PROXY kubectl patch secret diting-copilot-conn -n "$STACK_NS" \
     --type=json -p="[{\"op\":\"remove\",\"path\":\"/data/${_stale}\"}]" 2>/dev/null || true
 done
 env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout restart deployment/diting-copilot -n "$STACK_NS" 2>/dev/null || true
-env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout status deployment/diting-copilot -n "$STACK_NS" --timeout=120s
-echo "✅ Copilot AI(Opus) env 已注入 · RADAR_T2_ENABLED=${RADAR_T2_ENABLED:-true} · namespace=$STACK_NS"
+echo "✅ Copilot AI(Opus) env 已提交（业务第二梯队 · 不等待 Pod Ready）· RADAR_T2_ENABLED=${RADAR_T2_ENABLED:-true} · namespace=$STACK_NS"

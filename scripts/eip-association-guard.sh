@@ -48,7 +48,13 @@ case "$PLAN_EXIT" in
 esac
 
 # 端口可达性复验（base ECS 关键端口）— 新 ECS 需 cloud-init + K3s 初始化，默认轮询等待
-PUBLIC_IP="$(terraform output -raw public_ip 2>/dev/null || echo '')"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=terraform-output-safe.sh
+source "$SCRIPT_DIR/terraform-output-safe.sh"
+PUBLIC_IP="$(tf_output_raw_safe "$(pwd)" public_ip || true)"
+if ! _is_valid_public_ip "$PUBLIC_IP"; then
+  PUBLIC_IP="$(public_ip_from_kubeconfig "${KUBECONFIG:-$HOME/.kube/config-diting-prod}" || true)"
+fi
 [ -z "$PUBLIC_IP" ] && { echo "[guard] ⚠️ 无 public_ip 输出，跳过端口复验"; exit 0; }
 
 GUARD_SSH_MAX="${GUARD_SSH_MAX_ATTEMPTS:-36}"      # 默认最多 6 分钟等 SSH

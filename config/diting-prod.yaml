@@ -21,9 +21,10 @@ anthropic_proxy:
   user: ditingproxy
 
 deploy_control:
-  enable_timescaledb: true
-  enable_postgres_l2: true
-  enable_redis: true
+  # deploy-engine 步骤 4：仅校验/确保 K3s 存储插件；DB Helm 由 platform-step03 统一部署在 platform（勿在 default 重复安装）
+  enable_timescaledb: false
+  enable_postgres_l2: false
+  enable_redis: false
   k3s_storage_plugin: "local-path"
   timescaledb_storage:
     size: "50Gi"
@@ -199,11 +200,12 @@ stack:
     radarT0AkshareTimeoutSec: "12"
     radarT0Jobs:
       enabled: true
-      bootstrapHook: true
+      # deploy 不阻塞：bootstrap 改由 CronJob 异步；platform-step03 业务第二梯队亦强制 false
+      bootstrapHook: false
     # 28_ 执行中工作区 T0 Cron + bootstrap（香港 K3s）
     executingT0Jobs:
       enabled: true
-      bootstrapHook: true
+      bootstrapHook: false
     # 28_ daily-pipeline / migrate 曾 OOM(137) · 与 values 默认对齐 1.5Gi
     resources:
       requests:

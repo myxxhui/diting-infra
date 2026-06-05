@@ -43,31 +43,47 @@ command -v kubectl >/dev/null 2>&1 || { echo "错误: 需要 kubectl"; exit 1; }
 STACK_NS="$(yq eval '.stack.namespace // "platform"' "$CFG")"
 echo "[platform-step03-deploy] namespace=$STACK_NS"
 
+# 三梯队（严格顺序：基础设施第一 → 业务第一 → 业务第二）
+# · 基础设施第一梯队：节点 label / 迁移 / platform-base / PV·PVC + storage-init — helm --wait
+# · 业务第一梯队：TimescaleDB / PG-L2 / Redis — helm --wait 直至 Pod Ready
+# · 业务第二梯队：copilot / schema-init / module_a — 提交即返回，由 K8s 监管
+#   须 --no-hooks：bootstrap-sync 等 post-upgrade hook 会拉 akshare/东财，可阻塞数十分钟
+HELM_INFRA_T1_WAIT=(--wait --timeout=8m)
+HELM_BIZ_T1_WAIT=(--wait --timeout=8m)
+HELM_BIZ_T2_OPTS=(--timeout=10m --no-hooks)
+
+_helm_infra_stack_upgrade_or_install() {
+  local release="$1" chart="$2"
+  shift 2
+  if helm status "$release" -n "$STACK_NS" >/dev/null 2>&1; then
+    helm upgrade "$release" "$chart" -n "$STACK_NS" "$@" "${HELM_INFRA_T1_WAIT[@]}"
+  else
+    helm install "$release" "$chart" -n "$STACK_NS" "$@" "${HELM_INFRA_T1_WAIT[@]}"
+  fi
+}
+
+_wait_pvc_bound() {
+  local pvc_name="$1"
+  local timeout_sec="${2:-120}"
+  if kubectl get pvc "$pvc_name" -n "$STACK_NS" >/dev/null 2>&1; then
+    kubectl wait --for=jsonpath='{.status.phase}'=Bound "pvc/$pvc_name" -n "$STACK_NS" --timeout="${timeout_sec}s"
+    echo "  [基础设施第一梯队] PVC $STACK_NS/$pvc_name Bound ✅"
+  fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# 基础设施第一梯队：StorageClass / 静态 PV·PVC / storage-init（须就绪后再装库）
+# ══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "========== [基础设施第一梯队] 开始 =========="
+
 # ── 1) 节点 label=base（H4）────────────────────────────────────────────
 for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
   kubectl label node "$node" stack.diting/node=base --overwrite >/dev/null
   echo "  [H4] node $node label stack.diting/node=base ✅"
 done
 
-# ── 2) platform-base（P1~P4）──────────────────────────────────────────
-PB_SET="storageclassNas.enabled=true,nvidiaRuntimeClass.enabled=false"
-ACR_MANIFEST="$INFRA_ROOT/charts/diting-stack/manifests/acr-pull-secret.yaml"
-if [ -f "$ACR_MANIFEST" ] && command -v yq >/dev/null 2>&1; then
-  ACR_B64="$(yq eval '.data[".dockerconfigjson"] // ""' "$ACR_MANIFEST" 2>/dev/null || true)"
-  if [ -n "$ACR_B64" ] && [ "$ACR_B64" != "null" ]; then
-    PB_SET="$PB_SET,acrPullSecret.dockerconfigjson=${ACR_B64}"
-  fi
-fi
-if helm list -A 2>/dev/null | grep -q diting-platform-base; then
-  helm upgrade diting-platform-base "$INFRA_ROOT/charts/diting-platform-base" \
-    --set "$PB_SET" --wait --timeout=5m
-else
-  helm install diting-platform-base "$INFRA_ROOT/charts/diting-platform-base" \
-    --set "$PB_SET" --wait --timeout=5m
-fi
-echo "  [P1~P4] diting-platform-base ✅"
-
-# ── 3) 从 default 迁出（若存在）────────────────────────────────────────
+# ── 2) 从 default 迁出历史遗留（若存在）──────────────────────────────────
 _migrate_pv() {
   local pv_name="$1"
   local pvc_name="$2"
@@ -85,17 +101,35 @@ _migrate_pv() {
 if kubectl get ns default >/dev/null 2>&1; then
   helm uninstall timescaledb -n default 2>/dev/null || true
   helm uninstall postgresql-l2 -n default 2>/dev/null || true
+  helm uninstall redis -n default 2>/dev/null || true
   helm uninstall diting-stack -n default 2>/dev/null || true
   _migrate_pv timescaledb-data-pv data-timescaledb-postgresql-0 default
   _migrate_pv postgresql-l2-data-pv data-postgresql-l2-0 default
 fi
 
-# ── 4) diting-stack PV/PVC（先不启 schema-init / module_a）────────────────
+# ── 3) platform-base（P1~P4）────────────────────────────────────────────
+PB_SET="storageclassNas.enabled=true,nvidiaRuntimeClass.enabled=false"
+ACR_MANIFEST="$INFRA_ROOT/charts/diting-stack/manifests/acr-pull-secret.yaml"
+if [ -f "$ACR_MANIFEST" ] && command -v yq >/dev/null 2>&1; then
+  ACR_B64="$(yq eval '.data[".dockerconfigjson"] // ""' "$ACR_MANIFEST" 2>/dev/null || true)"
+  if [ -n "$ACR_B64" ] && [ "$ACR_B64" != "null" ]; then
+    PB_SET="$PB_SET,acrPullSecret.dockerconfigjson=${ACR_B64}"
+  fi
+fi
+if helm list -A 2>/dev/null | grep -q diting-platform-base; then
+  helm upgrade diting-platform-base "$INFRA_ROOT/charts/diting-platform-base" \
+    --set "$PB_SET" "${HELM_INFRA_T1_WAIT[@]}"
+else
+  helm install diting-platform-base "$INFRA_ROOT/charts/diting-platform-base" \
+    --set "$PB_SET" "${HELM_INFRA_T1_WAIT[@]}"
+fi
+echo "  [P1~P4] diting-platform-base Ready ✅"
+
+# ── 4) diting-stack 仅 storage（禁用业务组件）────────────────────────────
 TMP_STACK="$(mktemp)"
-yq eval '{"storage": .stack.storage, "copilot": .stack.copilot, "schemaInit": (.stack.schemaInit | .enabled = false), "module_a": (.stack.module_a | .enabled = false), "ingest": .stack.ingest}' "$CFG" > "$TMP_STACK"
+trap '/usr/bin/rm -f "$TMP_STACK" "$TMP_FULL"' EXIT INT TERM
+yq eval '{"storage": .stack.storage, "copilot": (.stack.copilot | .enabled = false), "schemaInit": (.stack.schemaInit | .enabled = false), "module_a": (.stack.module_a | .enabled = false), "ingest": (.stack.ingest | .enabled = false)}' "$CFG" > "$TMP_STACK"
 yq eval -i "
-  .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
-  .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
   .storage.timescaledb.pvc.namespace = \"${STACK_NS}\" |
   .storage.postgresL2.pvc.namespace = \"${STACK_NS}\" |
   .storage.radarT0Cache.pvc.namespace = \"${STACK_NS}\" |
@@ -103,17 +137,26 @@ yq eval -i "
   .storage.copilotReports.pvc.namespace = \"${STACK_NS}\"
 " "$TMP_STACK"
 
-if helm list -n "$STACK_NS" 2>/dev/null | grep -q diting-stack; then
-  helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_STACK" --wait --timeout=8m
-else
-  helm install diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_STACK" --wait --timeout=8m
-fi
-rm -f "$TMP_STACK"
-echo "  [S1] helm diting-stack @ ${STACK_NS} (PV/PVC) OK"
+_helm_infra_stack_upgrade_or_install diting-stack "$INFRA_ROOT/charts/diting-stack" -f "$TMP_STACK"
+/usr/bin/rm -f "$TMP_STACK"
+trap '/usr/bin/rm -f "$TMP_FULL"' EXIT INT TERM
 
-# ── 5) Bitnami DB（S2/S3）──────────────────────────────────────────────
+_wait_pvc_bound data-timescaledb-postgresql-0 120
+_wait_pvc_bound data-postgresql-l2-0 120
+if [ "$(yq eval '.stack.storage.redis.enabled // false' "$CFG")" = "true" ]; then
+  _wait_pvc_bound data-redis-master-0 120
+fi
+
+printf '%s\n' "  [S1] diting-stack storage PV/PVC + storage-init Ready @ ${STACK_NS}"
+echo "========== [基础设施第一梯队] 完成 =========="
+echo ""
+
+# ══════════════════════════════════════════════════════════════════════════
+# 业务第一梯队：关键数据依赖（须 Pod Ready 后再启业务第二梯队）
+# ══════════════════════════════════════════════════════════════════════════
+echo "========== [业务第一梯队] 开始 =========="
+
 helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
-# 国内访问 charts.bitnami.com 常 >10min 无响应；90s 超时后用本地 index 继续
 if command -v timeout >/dev/null 2>&1; then
   timeout 90 helm repo update bitnami >/dev/null 2>&1 \
     || echo "  ⚠️ bitnami repo update 超时/失败，使用本地 index 继续"
@@ -132,7 +175,7 @@ helm upgrade --install timescaledb bitnami/postgresql -n "$STACK_NS" \
   --set primary.persistence.existingClaim=data-timescaledb-postgresql-0 \
   --set primary.service.type=NodePort \
   --set primary.service.nodePorts.postgresql="$PORT_L1" \
-  --wait --timeout=8m
+  "${HELM_BIZ_T1_WAIT[@]}"
 
 helm upgrade --install postgresql-l2 bitnami/postgresql -n "$STACK_NS" \
   --set auth.username="$(yq eval '.stack.databases.postgres_l2.auth.username // "postgres"' "$CFG")" \
@@ -142,16 +185,14 @@ helm upgrade --install postgresql-l2 bitnami/postgresql -n "$STACK_NS" \
   --set primary.persistence.existingClaim=data-postgresql-l2-0 \
   --set primary.service.type=NodePort \
   --set primary.service.nodePorts.postgresql="$PORT_L2" \
-  --wait --timeout=8m
+  "${HELM_BIZ_T1_WAIT[@]}"
 
-echo "  [S2/S3] TimescaleDB + PG-L2 @ $STACK_NS ✅"
+echo "  [S2/S3] TimescaleDB + PG-L2 @ $STACK_NS Ready ✅"
 
-# Copilot 业务库（与 L2 同 postgresql-l2 实例 · ESSD 数据盘持久）
 if [ "$(yq eval '.stack.copilot.postgres.enabled // false' "$CFG")" = "true" ]; then
   CONFIG_ROOT="$CONFIG_ROOT" bash "$SCRIPT_DIR/copilot-ensure-pg-db.sh"
 fi
 
-# ── 5b) Redis（S2b · 当 deploy_control.enable_redis 或 stack.databases.redis.enabled）──
 ENABLE_REDIS="$(yq eval '.deploy_control.enable_redis // false' "$CFG")"
 REDIS_DB_ENABLED="$(yq eval '.stack.databases.redis.enabled // false' "$CFG")"
 if [ "$ENABLE_REDIS" = "true" ] || [ "$REDIS_DB_ENABLED" = "true" ]; then
@@ -161,19 +202,21 @@ if [ "$ENABLE_REDIS" = "true" ] || [ "$REDIS_DB_ENABLED" = "true" ]; then
     if [ "$(yq eval '.stack.storage.redis.enabled // false' "$CFG")" = "true" ]; then
       STACK_NS="$STACK_NS" bash "$SCRIPT_DIR/redis-migrate-static-pv.sh" || true
     fi
-    helm upgrade --install redis bitnami/redis -n "$STACK_NS" -f "$REDIS_VALUES" --wait --timeout=8m
-    echo "  [S2b] Redis @ $STACK_NS ✅（master 单副本 · replicaCount=0）"
-    # 早期误装在 default 的 bitnami/redis（1 master + 3 replica）占用资源，prod 仅用 platform
-    if helm list -n default -q 2>/dev/null | grep -qx 'redis'; then
-      echo "  [S2b] 卸载 default 命名空间遗留 redis（节省 3 个 replica Pod）…"
-      env -u HTTPS_PROXY -u HTTP_PROXY helm uninstall redis -n default --wait --timeout=5m || true
-    fi
+    helm upgrade --install redis bitnami/redis -n "$STACK_NS" -f "$REDIS_VALUES" "${HELM_BIZ_T1_WAIT[@]}"
+    printf '%s\n' "  [S2b] Redis @ ${STACK_NS} Ready - master only, replicaCount=0"
   else
     echo "  [S2b] ⚠️ Redis values 缺失，跳过"
   fi
 fi
 
-# ── 6) diting-stack 全量（schema-init + module_a）──────────────────────
+echo "========== [业务第一梯队] 完成 =========="
+echo ""
+
+# ══════════════════════════════════════════════════════════════════════════
+# 业务第二梯队：应用 / Job / CronJob（提交即返回，init 自行等待 DB/Redis）
+# ══════════════════════════════════════════════════════════════════════════
+echo "========== [业务第二梯队] 开始 =========="
+
 TMP_FULL="$(mktemp)"
 yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP_FULL"
 yq eval -i "
@@ -190,24 +233,23 @@ yq eval -i "
 if yq eval '.copilot.enabled // false' "$TMP_FULL" | grep -q true; then
   yq eval -i "
     .copilot.redisHost = \"redis-master.${STACK_NS}.svc.cluster.local\" |
-    .copilot.redisPort = \"6379\"
+    .copilot.redisPort = \"6379\" |
+    .copilot.radarT0Jobs.bootstrapHook = false |
+    .copilot.executingT0Jobs.bootstrapHook = false
   " "$TMP_FULL"
 fi
-helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_FULL" --wait --timeout=8m
-rm -f "$TMP_FULL"
-echo "  [S4/S5] schema-init + module_a chart 升级 ✅"
+helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_FULL" "${HELM_BIZ_T2_OPTS[@]}"
+/usr/bin/rm -f "$TMP_FULL"
+trap - EXIT INT TERM
 
-# ── 7) prod.conn + 集群内 Secret ───────────────────────────────────────
+echo "  [S4/S5] copilot / schema-init / module_a / ingest 已提交 @ ${STACK_NS}"
+echo "  查看: kubectl get pods,jobs -n $STACK_NS"
+echo "  schema-init: kubectl get jobs -n $STACK_NS -l component=schema-init"
+printf '%s\n' "========== [业务第二梯队] 已提交 - K8s 监管 =========="
+echo ""
+
+# ── prod.conn + 集群内 Secret ───────────────────────────────────────────
 "$SCRIPT_DIR/prod-write-conn.sh" "$CONFIG_ROOT" "deploy-engine" "$CONN_FILE" "$PROJECT" "$ENV" || true
 STACK_NS="$STACK_NS" "$SCRIPT_DIR/prod-sync-conn-secret.sh" "$CONFIG_ROOT" "$CONN_FILE" "$PROJECT" "$ENV"
 
-# 等待 schema-init Job（S4）
-for _ in $(seq 1 60); do
-  if kubectl get jobs -n "$STACK_NS" -l component=schema-init -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null | grep -q 1; then
-    echo "  [S4] schema-init Job Complete ✅"
-    break
-  fi
-  sleep 5
-done
-
-echo "[platform-step03-deploy] 完成"
+printf '%s\n' "[platform-step03-deploy] 完成: 基础设施第一+业务第一 Ready; 业务第二梯队异步拉起"

@@ -25,6 +25,12 @@ security_group_existing_id = "sg-t4nbaqrk3ffvdz2qkmsj"
 
 enable_prod_data_disk = false
 
+# 复用 2026-06-04 首次 deploy-proxy 已创建的 NAS（state 重建时避免 InvalidAccessGroup.AlreadyExisted）
+nas_existing_file_system_id      = "071y8idoeu52mroi0fk"
+nas_existing_access_group_name   = "deploy-engine_nas_group_sg-proxy"
+nas_use_existing_mount_target  = true
+nas_existing_mount_target_domain = "071y8idoeu52mroi0fk-xqg58.ap-southeast-1.nas.aliyuncs.com"
+
 oss_bucket_name = "diting-sg-proxy-storage"
 oss_bucket_acl  = "private"
 init_script_acl = "private"

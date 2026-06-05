@@ -16,11 +16,12 @@ global:
     apiServer:
       domain: "k3s-diting-prod.example.com"
 
-# 是否在集群内部署 TimescaleDB(L1)/PostgreSQL(L2)/Redis（Makefile 读取此处）
+# deploy-engine：仅 k3s_storage_plugin；DB 由 platform-step03 在 stack.namespace（platform）部署
+# stack.databases.*.enabled 控制 platform-step03 是否安装对应库
 deploy_control:
-  enable_timescaledb: true
-  enable_postgres_l2: true
-  enable_redis: true
+  enable_timescaledb: false
+  enable_postgres_l2: false
+  enable_redis: false
   k3s_storage_plugin: "local-path"
   timescaledb_storage:
     size: "50Gi"
