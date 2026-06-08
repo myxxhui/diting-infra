@@ -256,8 +256,23 @@ copilot:
     startingDeadlineSeconds: 3600
     cronjobs:
       - id: quote-intraday
-        schedule: "*/5 9-15 * * 1-5"
+        schedule: "*/5 9-14 * * 1-5"
         activeDeadlineSeconds: 600
+      - id: quote-intraday-close
+        schedule: "0 15 * * 1-5"
+        activeDeadlineSeconds: 600
+      - id: l4-vol-div-15m
+        schedule: "0,15,30,45 10-11,13-14 * * 1-5"
+        activeDeadlineSeconds: 900
+      - id: l4-vol-div-15m-open
+        schedule: "45 9 * * 1-5"
+        activeDeadlineSeconds: 900
+      - id: l4-vol-div-15m-close
+        schedule: "0 15 * * 1-5"
+        activeDeadlineSeconds: 900
+      - id: l4-atr-bars-sync
+        schedule: "0 16 * * 1-5"
+        activeDeadlineSeconds: 900
       - id: l4-micro-eod
         schedule: "10 16 * * 1-5"
         activeDeadlineSeconds: 1800

@@ -199,13 +199,31 @@ stack:
     radarT0LiveFallback: "true"
     radarT0AkshareTimeoutSec: "12"
     radarT0Jobs:
-      enabled: true
-      # deploy 不阻塞：bootstrap 改由 CronJob 异步；platform-step03 业务第二梯队亦强制 false
+      enabled: false
       bootstrapHook: false
-    # 28_ 执行中工作区 T0 Cron + bootstrap（香港 K3s）
+    # 28_ 执行中：仅开 #15 双轨（盘中 Redis 草稿 */5 + 16:00 PG 增量）；其余 Cron 仍关
     executingT0Jobs:
       enabled: true
       bootstrapHook: false
+      cronjobs:
+        - id: quote-intraday
+          schedule: "*/5 9-14 * * 1-5"
+          activeDeadlineSeconds: 600
+        - id: quote-intraday-close
+          schedule: "0 15 * * 1-5"
+          activeDeadlineSeconds: 600
+        - id: l4-vol-div-15m
+          schedule: "0,15,30,45 10-11,13-14 * * 1-5"
+          activeDeadlineSeconds: 900
+        - id: l4-vol-div-15m-open
+          schedule: "45 9 * * 1-5"
+          activeDeadlineSeconds: 900
+        - id: l4-vol-div-15m-close
+          schedule: "0 15 * * 1-5"
+          activeDeadlineSeconds: 900
+        - id: l4-atr-bars-sync
+          schedule: "0 16 * * 1-5"
+          activeDeadlineSeconds: 900
     # 28_ daily-pipeline / migrate 曾 OOM(137) · 与 values 默认对齐 1.5Gi
     resources:
       requests:

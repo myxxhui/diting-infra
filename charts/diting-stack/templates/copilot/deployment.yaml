@@ -87,12 +87,16 @@ spec:
             port: http
           initialDelaySeconds: 25
           periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         volumeMounts:
         {{- if .Values.storage.radarT0Cache.enabled }}
         - name: radar-t0-cache

@@ -368,7 +368,17 @@ up-stack: update-deploy-engine
 		export TF_VAR_use_existing_data_disk_id=$$(scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)"); \
 		echo "[up-stack] 复用数据盘 TF_VAR_use_existing_data_disk_id=$$TF_VAR_use_existing_data_disk_id"; \
 	fi; \
-	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; \
+	if ! CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; then \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  [up-stack] Terraform apply 失败，已中止后续步骤"; \
+		echo "=========================================="; \
+		echo "常见原因："; \
+		echo "  · InvalidAccountStatus.NotEnoughBalance — 阿里云账户余额不足，无法创建按量 ECS"; \
+		echo "  · Spot 库存不足 — 可临时将 stacks.base.spot_strategy 改为 NoSpot 或调高 spot_price_limit"; \
+		echo "  · state 漂移 — ECS 已销毁但 EIP 仍在，充值后重试 make up-stack diting-stack 即可重建"; \
+		exit 1; \
+	fi; \
 	bash scripts/eip-association-guard.sh "$$_stack" || echo "[up-stack] ⚠️ EIP/端口守门未通过（ECS/K3s 可能仍在启动，稍后 make kubeconfig-sync prod diting）"; \
 	CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/kubeconfig-fetch.sh prod diting || true
 
@@ -648,16 +658,30 @@ radar-t0-job-status:
 
 # 28_ 执行中工作区 · T0 Cron + bootstrap
 .PHONY: executing-t0-cron-install executing-t0-bootstrap-sync executing-t0-job-status
+.PHONY: executing-bars250-bootstrap executing-bars250-verify executing-bars250-deploy
 .PHONY: copilot-executing-workspace-deploy
 
 executing-t0-cron-install: copilot-helm-upgrade
 	@echo "✅ [executing-t0-cron-install] Helm 已含 copilot.executingT0Jobs（见 diting-prod.yaml）"
 	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform get cronjob -l component=executing-t0 2>/dev/null || \
-	  echo "⚠️  尚无 executing-t0 CronJob · 确认 executingT0Jobs.enabled=true"
+	  echo "ℹ️  无 executing-t0 CronJob（定时采集已关闭时为预期）"
 
 executing-t0-bootstrap-sync:
 	@chmod +x scripts/executing-t0-bootstrap-sync.sh
 	@KUBECONFIG="$(KUBECONFIG)" bash scripts/executing-t0-bootstrap-sync.sh
+
+executing-bars250-bootstrap:
+	@chmod +x scripts/executing-bars250-bootstrap.sh
+	@KUBECONFIG="$(KUBECONFIG)" MIN_BARS="$(MIN_BARS)" bash scripts/executing-bars250-bootstrap.sh
+
+executing-bars250-verify:
+	@chmod +x scripts/executing-bars250-verify.sh
+	@KUBECONFIG="$(KUBECONFIG)" MIN_BARS="$(MIN_BARS)" bash scripts/executing-bars250-verify.sh
+
+# 推镜像 + 关 Cron + 一次性 250 日底库采集 + DB 验收
+executing-bars250-deploy: copilot-deploy-fast
+	@$(MAKE) executing-bars250-bootstrap
+	@$(MAKE) executing-bars250-verify
 
 executing-t0-job-status:
 	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
@@ -671,7 +695,7 @@ copilot-executing-workspace-deploy: copilot-deploy-fast
 		|| (echo "⚠️  migrate exec 失败(常见137 OOM) · 可改由 executing-t0-bootstrap-sync Job 补跑" && false)
 	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
 		python scripts/executing_import_positions.py || true
-	@$(MAKE) executing-t0-cron-install
+	@echo "ℹ️  [copilot-executing-workspace-deploy] 定时采集已关闭 · 250 日底库请 make executing-bars250-deploy"
 	@chmod +x scripts/copilot-executing-tier2-verify-k8s.sh
 	@EXECUTING_SYMBOL="$${EXECUTING_SYMBOL:-601138}" bash scripts/copilot-executing-tier2-verify-k8s.sh
 
