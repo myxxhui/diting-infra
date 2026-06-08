@@ -270,6 +270,12 @@ copilot:
       - id: l4-vol-div-15m-close
         schedule: "0 15 * * 1-5"
         activeDeadlineSeconds: 900
+      - id: l4-smart-money-backfill
+        schedule: "0 14 * * 1-5"
+        activeDeadlineSeconds: 3600
+      - id: l4-smart-money-eod
+        schedule: "0 17 * * 1-5"
+        activeDeadlineSeconds: 900
       - id: l4-atr-bars-sync
         schedule: "0 16 * * 1-5"
         activeDeadlineSeconds: 900

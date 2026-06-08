@@ -2,6 +2,9 @@
 # 生产环境（diting prod）部署配置
 # ==============================================================================
 # make deploy diting prod / make down diting prod 由此文件驱动。
+# 双环境契约（强制）：①香港 prod（diting/prod · STACK=base）②新加坡代理（diting/sg-proxy · STACK=proxy）。
+#   deploy：先起代理再起香港集群 → platform-stack → sync ANTHROPIC_HTTPS_PROXY → verify 代理健康。
+#   down：先卸 Helm/栈 → 销代理 ECS+EIP → 销香港 ECS+EIP（任一步失败仍继续，末步汇总 exit 1）。
 # diting-stack：仅创建静态 PV/PVC（数据继承）；数据库使用官方 Bitnami Chart 部署。
 # ==============================================================================
 
@@ -12,7 +15,7 @@ global:
       domain: "k3s-diting-prod.example.com"
 
 # deploy-engine 用：不在此处部署数据库，由 deploy-stack.sh 用官方 Chart 部署
-# 新加坡 Anthropic 出口代理（香港 ECS 403 时 · deploy-engine env=sg-proxy）
+# 新加坡 Anthropic 出口代理（make deploy/down diting prod 强制联动，勿设 enabled: false）
 anthropic_proxy:
   enabled: true
   deploy_engine_env: sg-proxy
@@ -185,7 +188,7 @@ stack:
       lighthouseModel: "claude-opus-4-8"
       anthropicModel: "claude-opus-4-8"
       anthropicBaseUrl: "https://api.anthropic.com"
-      # deepseekApiKey / radarT1Mode 由 copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入
+      # deepseekApiKey / radarT1Mode / tushareToken 由 copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入
       radarT1Mode: "auto"
     radarT0CacheDir: "/data/radar_t0_cache"
     # 波次四：文件缓存 24h · DB 30 天 · 7 版/标的 · 候选区近 7 日
@@ -220,6 +223,12 @@ stack:
           activeDeadlineSeconds: 900
         - id: l4-vol-div-15m-close
           schedule: "0 15 * * 1-5"
+          activeDeadlineSeconds: 900
+        - id: l4-smart-money-backfill
+          schedule: "0 14 * * 1-5"
+          activeDeadlineSeconds: 3600
+        - id: l4-smart-money-eod
+          schedule: "0 17 * * 1-5"
           activeDeadlineSeconds: 900
         - id: l4-atr-bars-sync
           schedule: "0 16 * * 1-5"
