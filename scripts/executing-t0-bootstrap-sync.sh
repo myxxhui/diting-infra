@@ -64,6 +64,16 @@ spec:
             cpu: "1"
 EOF
 
-kubectl --kubeconfig="$KUBECONFIG" -n "$NS" wait --for=condition=complete "job/${JOB}" --timeout=3600s
+WAIT="${EXECUTING_T0_WAIT:-0}"
+TIMEOUT="${EXECUTING_T0_WAIT_TIMEOUT:-900s}"
+
+if [ "$WAIT" = "0" ]; then
+  echo "▶ [executing-t0-bootstrap-sync] 异步提交（EXECUTING_T0_WAIT=0）· 跟踪: kubectl -n $NS logs -f job/${JOB}"
+  echo "✅ [executing-t0-bootstrap-sync] Job 已创建 · 不阻塞等待"
+  exit 0
+fi
+
+echo "▶ [executing-t0-bootstrap-sync] 同步等待 · timeout=${TIMEOUT}（改 EXECUTING_T0_WAIT=0 可异步）"
+kubectl --kubeconfig="$KUBECONFIG" -n "$NS" wait --for=condition=complete "job/${JOB}" --timeout="${TIMEOUT}"
 kubectl --kubeconfig="$KUBECONFIG" -n "$NS" logs "job/${JOB}" --tail=80
 echo "✅ [executing-t0-bootstrap-sync] 完成"

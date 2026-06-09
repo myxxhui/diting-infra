@@ -2,12 +2,12 @@
 
 env_id        = "prod"
 region        = "cn-hongkong"
-instance_type = "ecs.u1-c1m4.xlarge"
+instance_type = "ecs.u1-c1m4.large"  # 2026-06-09 xlarge 售罄 · 按量 large 有库存
 # instance_password 由 diting-infra/.env 的 TF_VAR_instance_password 注入（勿在此写明文）
 vpc_cidr         = "10.0.0.0/16"
 vswitch_cidr     = "10.0.1.0/24"
-enable_spot      = true
-spot_strategy    = "SpotAsPriceGo"
+enable_spot      = false
+spot_strategy    = "NoSpot"  # 香港 prod 按量付费，避免竞价回收
 spot_price_limit = 0.5
 eip_bandwidth    = 100
 disk_category    = "cloud_essd"
@@ -26,8 +26,8 @@ nas_use_existing_mount_target = true
 
 nas_existing_mount_target_domain = "12db2e48f90-hpy48.cn-hongkong.nas.aliyuncs.com"
 # 数据盘由 Terraform alicloud_disk.prod_data 管理；Down 后 disk_id 写入 prod.disk_id 供下次 Up 复用
-# use_existing_data_disk_id 留空；若需复用已有盘则填 ID 并从 state rm prod_data[0]
-use_existing_data_disk_id = ""
+# 竞价实例回收后 Up 须复挂已有数据盘（与 prod.disk_id 一致）
+use_existing_data_disk_id = "d-j6ce444m0p0kf0jwxhcu"
 
 enable_prod_data_disk = true
 data_disk_size        = 100
@@ -44,8 +44,8 @@ init_script_acl = "public-read"
 # ============================================================================
 stacks = {
   base = {
-    instance_type        = "ecs.u1-c1m4.xlarge"
-    spot_strategy        = "SpotAsPriceGo"
+    instance_type        = "ecs.u1-c1m4.large"
+    spot_strategy        = "NoSpot"  # 按量付费（PostPaid）
     spot_price_limit     = 0.6
     image_family         = "ubuntu_22_04"
     system_disk_gb       = 60

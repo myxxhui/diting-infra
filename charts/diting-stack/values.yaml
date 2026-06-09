@@ -288,6 +288,9 @@ copilot:
       - id: l4-turnover-accel-eod
         schedule: "30 15 * * 1-5"
         activeDeadlineSeconds: 3600
+      - id: l4-beta-correlation-eod
+        schedule: "30 15 * * 1-5"
+        activeDeadlineSeconds: 3600
       - id: l4-block-trade-eod
         schedule: "0 18 * * 1-5"
         activeDeadlineSeconds: 3600

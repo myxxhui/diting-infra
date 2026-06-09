@@ -24,7 +24,7 @@ DIRTY_HASH="$(
     git -C "$SRC_ROOT" diff HEAD 2>/dev/null || true
     git -C "$SRC_ROOT" diff 2>/dev/null || true
     git -C "$SRC_ROOT" ls-files --others --exclude-standard 2>/dev/null || true
-  } | shasum -a 256 2>/dev/null | cut -c1-7
+  } | (shasum -a 256 2>/dev/null || sha256sum 2>/dev/null) | cut -c1-7
 )"
 if [ -z "$DIRTY_HASH" ]; then
   DIRTY_HASH="$(date -u +%m%d%H%M)"

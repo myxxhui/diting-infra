@@ -9,6 +9,10 @@ SRC_ENV="${SRC_ENV:-$INFRA_ROOT/../diting-src/.env}"
 CFG="${CONFIG_ROOT:-$INFRA_ROOT/config}/diting-prod.yaml"
 STACK_NS="$(yq eval '.stack.namespace // "platform"' "$CFG")"
 
+INFRA_ENV="$INFRA_ROOT/.env"
+[ -f "$INFRA_ENV" ] || true
+# infra 填缺口，src 优先（TUSHARE 等常在 diting-infra/.env）
+if [ -f "$INFRA_ENV" ]; then set -a && source "$INFRA_ENV" && set +a; fi
 [ -f "$SRC_ENV" ] || { echo "错误: 缺少 $SRC_ENV"; exit 1; }
 set -a && source "$SRC_ENV" && set +a
 [ -n "${ANTHROPIC_API_KEY:-}" ] \
@@ -56,6 +60,8 @@ yq eval -i "
   .copilot.ai.deepseekModel = \"${DEEPSEEK_MODEL:-deepseek-chat}\" |
   .copilot.ai.radarT1Mode = \"${RADAR_T1_MODE:-auto}\" |
   .copilot.ai.tushareToken = \"${TUSHARE_TOKEN:-}\" |
+  .copilot.ai.executingT2MaxOutputTokens = \"${EXECUTING_T2_MAX_OUTPUT_TOKENS:-16384}\" |
+  .copilot.ai.executingT2MaxInputChars = \"${EXECUTING_T2_MAX_INPUT_CHARS:-180000}\" |
   .copilot.radarT0CacheMaxAgeHours = \"${RADAR_T0_CACHE_MAX_AGE_HOURS:-24}\" |
   .copilot.radarT0RetentionDays = \"${RADAR_T0_RETENTION_DAYS:-1}\" |
   .copilot.radarFileRetentionHours = \"${RADAR_FILE_RETENTION_HOURS:-24}\" |

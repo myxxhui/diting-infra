@@ -503,8 +503,9 @@ platform-step03-test-persist: platform-step03-prep
 platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-test-persist
 	@echo "✅ [platform-step03-all] up + smoke + persist 完成"
 
-# Copilot 部署加速：依赖层 Dockerfile · 仅推 sha · ACR 已有则跳过构建 · CI 构建 + 本地 helm-only
-.PHONY: copilot-build-push copilot-build-push-if-needed copilot-helm-upgrade copilot-deploy-fast
+# Copilot 部署加速：三档 smart/rollout/push/full · 内容 tag · ACR/本地缓存跳过 rebuild
+.PHONY: copilot-build-push copilot-build-push-if-needed copilot-push-local copilot-helm-upgrade copilot-rollout-wait
+.PHONY: copilot-deploy copilot-deploy-rollout copilot-deploy-push copilot-deploy-full copilot-deploy-fast
 .PHONY: copilot-smoke-url copilot-sync-smtp copilot-pg-deploy copilot-sync-tag-from-cluster
 copilot-sync-smtp:
 	@bash scripts/copilot-sync-smtp-from-src-env.sh
@@ -524,7 +525,7 @@ copilot-build-push:
 # 内容寻址 tag：ACR 已有同 tag 才跳过；脏工作区自动 -d<hash>，避免旧镜像被同名覆盖
 copilot-build-push-if-needed:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	chmod +x "$$root/scripts/copilot-resolve-image-tag.sh"; \
+	chmod +x "$$root/scripts/copilot-resolve-image-tag.sh" "$$root/scripts/copilot-push-local-if-needed.sh"; \
 	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-resolve-image-tag.sh")}"; \
 	export COPILOT_IMAGE_TAG="$$_tag"; \
 	if [ "$${COPILOT_FORCE_BUILD:-0}" = "1" ]; then \
@@ -534,21 +535,50 @@ copilot-build-push-if-needed:
 	  echo "▶ [copilot] COPILOT_SKIP_BUILD=1 · 跳过构建（tag=$$_tag）"; \
 	elif bash "$$root/scripts/copilot-acr-image-exists.sh" "$$_tag"; then \
 	  echo "▶ [copilot] ACR 已有 $$_tag · 跳过构建推送"; \
+	elif bash "$$root/scripts/copilot-push-local-if-needed.sh" "$$_tag"; then \
+	  echo "▶ [copilot] 本地镜像已 push · 跳过 docker build"; \
 	else \
-	  echo "▶ [copilot] ACR 无 $$_tag · 构建并推送"; \
+	  echo "▶ [copilot] ACR 无 $$_tag 且本地无缓存 · 构建并推送（约 5–10min）"; \
 	  $(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
 	fi
 
-# 仅 Helm + rollout（镜像已由 CI/此前 push 提供）
+copilot-push-local:
+	@chmod +x scripts/copilot-push-local-if-needed.sh scripts/copilot-resolve-image-tag.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-push-local-if-needed.sh
+
+# 仅 Helm + rollout（镜像已在 ACR；~30s）
 copilot-helm-upgrade:
 	@chmod +x scripts/copilot-helm-upgrade.sh scripts/copilot-sync-ai-from-src-env.sh \
 	  scripts/copilot-resolve-image-tag.sh scripts/copilot-sync-image-tag-to-config.sh
 	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" \
 	  bash scripts/copilot-helm-upgrade.sh
 
-# 推荐日常：内容 tag 构建 + Helm + 回写 diting-prod.yaml
-copilot-deploy-fast: copilot-build-push-if-needed copilot-helm-upgrade
-	@echo "✅ [copilot-deploy-fast] 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"
+copilot-rollout-wait:
+	@chmod +x scripts/copilot-rollout-wait.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-rollout-wait.sh
+
+# ── 标准三档部署（AI/日常默认 copilot-deploy = smart）────────────────────────
+copilot-deploy-rollout: copilot-helm-upgrade copilot-rollout-wait
+	@echo "✅ [copilot-deploy-rollout] 档位 A 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"
+
+copilot-deploy-push: copilot-build-push-if-needed copilot-helm-upgrade copilot-rollout-wait
+	@echo "✅ [copilot-deploy-push] 档位 B 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"
+
+copilot-deploy-full:
+	@chmod +x scripts/copilot-resolve-image-tag.sh
+	@_tag="$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"; \
+	$(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
+	$(MAKE) copilot-helm-upgrade; \
+	$(MAKE) copilot-rollout-wait; \
+	echo "✅ [copilot-deploy-full] 档位 C 完成 · tag=$$_tag"
+
+copilot-deploy:
+	@chmod +x scripts/copilot-deploy.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-deploy.sh smart
+
+# 向后兼容别名（等同 copilot-deploy smart）
+copilot-deploy-fast: copilot-deploy
+	@:
 
 copilot-pg-deploy:
 	@chmod +x scripts/copilot-ensure-pg-db.sh scripts/copilot-pg-prod-deploy.sh \
@@ -719,7 +749,18 @@ executing-t0-cron-install: copilot-helm-upgrade
 
 executing-t0-bootstrap-sync:
 	@chmod +x scripts/executing-t0-bootstrap-sync.sh
-	@KUBECONFIG="$(KUBECONFIG)" bash scripts/executing-t0-bootstrap-sync.sh
+	@EXECUTING_T0_WAIT="$${EXECUTING_T0_WAIT:-0}" EXECUTING_T0_WAIT_TIMEOUT="$${EXECUTING_T0_WAIT_TIMEOUT:-900s}" \
+	  KUBECONFIG="$(KUBECONFIG)" bash scripts/executing-t0-bootstrap-sync.sh
+
+# 同步等待 bootstrap（显式阻塞 · 默认 timeout 15min）
+executing-t0-bootstrap-sync-wait:
+	@chmod +x scripts/executing-t0-bootstrap-sync.sh
+	@EXECUTING_T0_WAIT=1 EXECUTING_T0_WAIT_TIMEOUT="$${EXECUTING_T0_WAIT_TIMEOUT:-900s}" \
+	  KUBECONFIG="$(KUBECONFIG)" bash scripts/executing-t0-bootstrap-sync.sh
+
+executing-t0-catchup-eod:
+	@chmod +x scripts/executing-t0-catchup-eod.sh
+	@KUBECONFIG="$(KUBECONFIG)" bash scripts/executing-t0-catchup-eod.sh
 
 executing-bars250-bootstrap:
 	@chmod +x scripts/executing-bars250-bootstrap.sh

@@ -49,6 +49,22 @@ AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/de
 
 ---
 
+## Copilot 快速部署三档（AI/日常标准 · 与协议 §十一 同步）
+
+- **工作目录**：本仓 `diting-infra` · `KUBECONFIG=~/.kube/config-diting-prod`
+- **默认**：`make copilot-deploy`（= smart：ACR 有→rollout；本地有→push；否则 full build）
+- **仅 Helm/env**：`make copilot-deploy-rollout`（~30s，镜像已在 ACR）
+- **本地已 build**：`make copilot-deploy-push` 或 `make copilot-push-local && make copilot-helm-upgrade`
+- **强制重建**：`make copilot-deploy-full` 或 `COPILOT_FORCE_BUILD=1 make copilot-deploy`
+- **executing 补采**：`make executing-t0-bootstrap-sync`（默认异步）；阻塞等 Job 用 `make executing-t0-bootstrap-sync-wait`
+- **禁止**：把 executing bootstrap 默认绑进 deploy（曾导致 90min 级阻塞）；deploy 后需补采时单独 make
+- **凭证**：Helm 注入先读 `diting-infra/.env` 再读 `diting-src/.env`（TUSHARE 等可只写 infra）
+- **AI**：改代码后须同会话执行 `make copilot-deploy`，禁止「请本地 deploy」收尾
+
+完整条文见 `diting-doc/00_系统规则_通用项目协议.md` §十一「Copilot 快速部署三档」。
+
+---
+
 ## 部署与编排文件归属（与协议 §十一 一致）
 
 - **本仓（diting-infra）为部署/编排的归属仓**：Docker Compose、本地验证用编排文件（如 `compose/docker-compose.ingest.yaml`、`compose/docker-compose.module-a.yaml`）须放在**本仓**，禁止放在 diting-src。

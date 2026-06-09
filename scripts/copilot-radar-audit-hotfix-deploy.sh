@@ -122,7 +122,8 @@ proc = subprocess.run(
     ["kubectl", "apply", "-f", "-"],
     input=json.dumps(dep_obj).encode(),
     env=env,
-    capture_output=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
 )
 if proc.returncode != 0:
     raise SystemExit(proc.stderr.decode() or f"kubectl apply failed {proc.returncode}")

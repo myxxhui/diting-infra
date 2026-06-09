@@ -135,9 +135,10 @@ $(ALICLOUD_REGION="$region" SUFFIX="$suffix" python3 - <<'PY'
 import json, os, subprocess, sys
 region = os.environ.get("ALICLOUD_REGION", "ap-southeast-1")
 suffix = os.environ.get("SUFFIX", "-proxy-sg-proxy")
+# Python 3.6 无 capture_output/text，须用 PIPE + universal_newlines
 p = subprocess.run(
     ["aliyun", "ecs", "DescribeInstances", "--region", region, "--PageSize", "50"],
-    capture_output=True, text=True,
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
 )
 if p.returncode != 0:
     sys.exit(1)
@@ -273,7 +274,10 @@ suffix, conn_ip = sys.argv[1], sys.argv[2]
 region = os.environ.get("ALICLOUD_REGION", "ap-southeast-1")
 
 def run(*args):
-    p = subprocess.run(["aliyun", *args, "--region", region], capture_output=True, text=True)
+    p = subprocess.run(
+        ["aliyun", *args, "--region", region],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+    )
     if p.returncode != 0:
         raise RuntimeError(p.stderr.strip() or p.stdout.strip() or "aliyun failed")
     return json.loads(p.stdout) if p.stdout.strip() else {}

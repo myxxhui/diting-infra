@@ -93,4 +93,19 @@ except Exception as e:
 | 缓存仅 T0 / T2 过期 | 生产 **live Opus 经 B 代理** |
 | 缓存 miss + `RADAR_T0_LIVE_FALLBACK=false` | 不 live 拉东财，提示先 sync |
 
+## 7. 故障：长 Opus 请求 Connection error（3proxy 重启循环）
+
+**症状**：短请求成功，T2 完整审计（2～5 分钟）报 `Server disconnected without sending a response`。
+
+**根因**：`user-data-proxy.sh` 旧版 `Type=forking` + `daemon` 导致 systemd 每 ~90s 判定启动失败并重启，长连接被掐断。
+
+**已部署实例热修复**：
+
+```bash
+cd diting-infra
+bash scripts/fix-sg-3proxy-systemd.sh
+```
+
+**新建实例**：须在 deploy-engine 仓更新 `deploy/bootstrap/scripts/user-data-proxy.sh`（`Type=simple`、去掉 `daemon`、`timeouts` 放宽至 `600/3600`），push 后 `make update-deploy-engine`。
+
 [Ref: step_14 · L4 实践记录_ModeC深度研报重构]

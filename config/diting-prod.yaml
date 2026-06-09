@@ -158,7 +158,7 @@ stack:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
       # 与线上一致 · make copilot-deploy-fast 会按 copilot-resolve-image-tag.sh 回写
       # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
-      tag: be1f47c6-d192135e
+      tag: "b8eeb988-d3f3023c"
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
@@ -178,6 +178,9 @@ stack:
     # copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入（密钥不入库）
     ai:
       radarT2Enabled: "true"
+      executingT2Enabled: "true"
+      executingT2MaxOutputTokens: "16384"
+      executingT2MaxInputChars: "180000"
       lighthouseModel: "claude-opus-4-8"
       anthropicModel: "claude-opus-4-8"
       anthropicBaseUrl: "https://api.anthropic.com"
@@ -233,6 +236,9 @@ stack:
           schedule: "30 8 * * 2-6"
           activeDeadlineSeconds: 3600
         - id: l4-turnover-accel-eod
+          schedule: "30 15 * * 1-5"
+          activeDeadlineSeconds: 3600
+        - id: l4-beta-correlation-eod
           schedule: "30 15 * * 1-5"
           activeDeadlineSeconds: 3600
         - id: l4-block-trade-eod
