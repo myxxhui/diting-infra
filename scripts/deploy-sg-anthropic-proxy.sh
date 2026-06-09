@@ -37,12 +37,23 @@ _write_conn_and_finish() {
 
 echo "▶ [deploy-sg-anthropic-proxy] PROJECT=${PROJECT} ENV=${ENV} region=ap-southeast-1"
 
+# state 漂移但云上已有 proxy ECS 时，先尝试直接健康复用（避免重复 deploy-proxy）
+if [ "${FORCE_PROXY_DEPLOY:-0}" != "1" ] && sg_proxy_read_outputs_from_cloud "$ENV" 2>/dev/null; then
+  _port="${PROXY_PORT:-$PROXY_PORT_CFG}"
+  if sg_proxy_health_check "$PROXY_IP" "$_port" "$PROXY_USER" "$PROXY_PASSWORD" 3 5; then
+    echo "✅ [deploy-sg-anthropic-proxy] 云上 proxy 已存在且健康，跳过 deploy-proxy"
+    _write_conn_and_finish "$PROXY_IP" "$_port"
+    exit 0
+  fi
+  echo "⚠️  [deploy-sg-anthropic-proxy] 云上 proxy 存在但尚未就绪（ip=${PROXY_IP}），等待 cloud-init/3proxy 后再验"
+fi
+
 # 强制重建（排障）：FORCE_PROXY_DEPLOY=1 跳过复用探测
 if [ "${FORCE_PROXY_DEPLOY:-0}" != "1" ]; then
   if sg_proxy_resolve_endpoint "$INFRA_ROOT" "$PROJECT" "$ENV" "$CONN_FILE" "$PROXY_PORT_CFG"; then
     _port="${PROXY_PORT:-$PROXY_PORT_CFG}"
     if sg_proxy_state_has_instance "$INFRA_ROOT" "$PROJECT" "$ENV" 2>/dev/null; then
-      sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" || true
+      sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" "$ENV" || true
       echo "ℹ️  [deploy-sg-anthropic-proxy] state 已有 proxy instance=${PROXY_INSTANCE_ID:-?} ip=${PROXY_IP}"
     else
       echo "ℹ️  [deploy-sg-anthropic-proxy] 无 state，探测 sg-proxy.conn / 已知 endpoint ip=${PROXY_IP}"
@@ -55,7 +66,7 @@ if [ "${FORCE_PROXY_DEPLOY:-0}" != "1" ]; then
     if sg_proxy_state_has_instance "$INFRA_ROOT" "$PROJECT" "$ENV" 2>/dev/null; then
       echo "⚠️  [deploy-sg-anthropic-proxy] state 中实例不可用，仅 up-proxy（非全量 apply）"
       make -C "$INFRA_ROOT/deploy-engine" up-proxy "$PROJECT" "$ENV"
-      sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" || true
+      sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" "$ENV" || true
       _port="${PROXY_PORT:-$PROXY_PORT_CFG}"
       if sg_proxy_health_check "${PROXY_IP:-}" "$_port" "$PROXY_USER" "$PROXY_PASSWORD" 6 10; then
         _write_conn_and_finish "$PROXY_IP" "$_port"
@@ -76,8 +87,8 @@ else
   make -C "$INFRA_ROOT/deploy-engine" deploy-proxy "$PROJECT" "$ENV"
 fi
 
-sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" || {
-  echo "错误: deploy/up 后仍无法读取 anthropic_proxy_public_ip"
+sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" "$ENV" || {
+  echo "错误: deploy/up 后仍无法读取 anthropic_proxy_public_ip（已尝试 Terraform output 与云上 ECS 回填）"
   exit 1
 }
 _port="${PROXY_PORT:-$PROXY_PORT_CFG}"

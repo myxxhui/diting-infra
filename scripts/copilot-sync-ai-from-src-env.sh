@@ -19,7 +19,7 @@ _PG_ENABLED="$(yq eval '.stack.copilot.postgres.enabled // false' "$CFG")"
 _PG_PERSIST="$(yq eval '.stack.copilot.persistence.enabled // false' "$CFG")"
 # 勿用 TMP：make「export」可能注入同名环境变量；trap 清理避免 rm 被遮蔽时误执行 values 文件（exit 126）
 _VALUES_FILE="$(mktemp)"
-trap '/usr/bin/rm -f "$_VALUES_FILE"' EXIT INT TERM
+trap 'rm -f "$_VALUES_FILE"' EXIT INT TERM
 CHART_VALUES="$INFRA_ROOT/charts/diting-stack/values.yaml"
 yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$_VALUES_FILE"
 # radarT0Jobs：prod 可覆盖 enabled/bootstrapHook；cron 表默认来自 chart values.yaml
@@ -55,6 +55,7 @@ yq eval -i "
   .copilot.ai.deepseekBaseUrl = \"${DEEPSEEK_BASE_URL:-https://api.deepseek.com}\" |
   .copilot.ai.deepseekModel = \"${DEEPSEEK_MODEL:-deepseek-chat}\" |
   .copilot.ai.radarT1Mode = \"${RADAR_T1_MODE:-auto}\" |
+  .copilot.ai.tushareToken = \"${TUSHARE_TOKEN:-}\" |
   .copilot.radarT0CacheMaxAgeHours = \"${RADAR_T0_CACHE_MAX_AGE_HOURS:-24}\" |
   .copilot.radarT0RetentionDays = \"${RADAR_T0_RETENTION_DAYS:-1}\" |
   .copilot.radarFileRetentionHours = \"${RADAR_FILE_RETENTION_HOURS:-24}\" |
@@ -93,11 +94,11 @@ export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
 # 集群 API 不得走出口代理（仅 Pod 内 Anthropic 客户端读 ANTHROPIC_HTTPS_PROXY）
 env -u HTTPS_PROXY -u HTTP_PROXY helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$_VALUES_FILE" --timeout=10m --no-hooks
 trap - EXIT INT TERM
-/usr/bin/rm -f "$_VALUES_FILE"
+rm -f "$_VALUES_FILE"
 # Helm 升级 Secret 不会删除已废弃的 data 键，显式移除进程级 HTTPS_PROXY/HTTP_PROXY
 for _stale in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
   env -u HTTPS_PROXY -u HTTP_PROXY kubectl patch secret diting-copilot-conn -n "$STACK_NS" \
     --type=json -p="[{\"op\":\"remove\",\"path\":\"/data/${_stale}\"}]" 2>/dev/null || true
 done
 env -u HTTPS_PROXY -u HTTP_PROXY kubectl rollout restart deployment/diting-copilot -n "$STACK_NS" 2>/dev/null || true
-echo "✅ Copilot AI(Opus) env 已提交（业务第二梯队 · 不等待 Pod Ready）· RADAR_T2_ENABLED=${RADAR_T2_ENABLED:-true} · namespace=$STACK_NS"
+echo "✅ Copilot AI(Opus) env 已提交（业务第二梯队 · 不等待 Pod Ready）· RADAR_T2_ENABLED=${RADAR_T2_ENABLED:-true} · TUSHARE_TOKEN=$([ -n "${TUSHARE_TOKEN:-}" ] && echo set || echo missing) · namespace=$STACK_NS"

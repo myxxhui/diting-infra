@@ -111,13 +111,25 @@ diting-infra/
 
 ## 核心工作流
 
+### 新机器 / 换目录首次部署
+
+```bash
+git submodule update --init --remote deploy-engine
+make init-local-config          # .env + terraform-diting-prod.tfvars
+# 编辑 .env 填写 ALICLOUD_* 与 TF_VAR_instance_password
+make check-deploy-prereqs
+make deploy diting prod
+```
+
+详见 [`config/README.md`](config/README.md)「新机器拉仓 SOP」。**不随 Git 带走**：`.env`、`prod.conn`、`prod.disk_id`、`sg-proxy.conn`（后三者由 deploy/down 自动维护）。
+
 ### 部署生产环境
 
 ```bash
 # 1. 更新 deploy-engine 子模块
 make update-deploy-engine
 
-# 2. 部署（包含 Terraform、K3s、diting-stack 静态存储、官方 Chart 数据库）
+# 2. 部署（新加坡代理 + 香港 K3s + Platform Stack；双环境强制联动）
 make deploy diting prod
 
 # 3. 验证

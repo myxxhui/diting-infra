@@ -18,7 +18,7 @@ STAGE2_01_NS ?= default
 -include .env
 export
 
-.PHONY: update-deploy-engine deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
+.PHONY: update-deploy-engine init-local-config check-deploy-prereqs deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
 .PHONY: deploy-sg-anthropic-proxy verify-sg-anthropic-proxy down-sg-anthropic-proxy sync-anthropic-proxy-to-copilot \
 	deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled \
 	deploy-anthropic-proxy-if-enabled down-anthropic-proxy-if-enabled
@@ -35,6 +35,21 @@ sg-proxy:
 # 每次执行 Stage1-03 前必做：更新 deploy-engine 代码（submodule）
 update-deploy-engine:
 	@git submodule update --init --remote $(DEPLOY_ENGINE_DIR) && echo "[OK] deploy-engine 已更新"
+
+# 新机器首次：从 template 复制 .env 与 prod tfvars（不覆盖已有文件）
+init-local-config:
+	@if [ ! -f .env ]; then cp .env.template .env && echo "[init] 已创建 .env · 请填写 ALICLOUD_ACCESS_KEY / ALICLOUD_SECRET_KEY / TF_VAR_instance_password"; \
+	else echo "[init] .env 已存在，跳过"; fi
+	@if [ ! -f "$(CONFIG_ROOT)/terraform-diting-prod.tfvars" ]; then \
+		cp "$(CONFIG_ROOT)/terraform-diting-prod.tfvars.example" "$(CONFIG_ROOT)/terraform-diting-prod.tfvars" && \
+		echo "[init] 已创建 config/terraform-diting-prod.tfvars · 密码请用 TF_VAR_instance_password 注入"; \
+	else echo "[init] terraform-diting-prod.tfvars 已存在，跳过"; fi
+	@echo "[init] sg-proxy tfvars 已随仓提交（config/terraform-diting-sg-proxy.tfvars）"
+	@echo "[init] 下一步: 编辑 .env 后执行 make check-deploy-prereqs"
+
+# 换机 / 新目录拉仓后自检（不发起云 API）
+check-deploy-prereqs:
+	@bash scripts/check-deploy-prereqs.sh
 
 # kubecm 多 kubeconfig 管理（P 轨 / deploy-engine 配套）
 ensure-kubecm:
@@ -132,56 +147,65 @@ deploy-data-db-prod: deploy-diting-prod
 down-data-db-prod: down-diting-prod
 
 # make deploy diting prod 的实际执行 target。若 Terraform state 中 NAS 访问组仍为 dev 共享（diting_nas_group_dev），deploy 时会尝试 replace 并销毁该资源导致 InvalidAccessGroup.AlreadyAttached；Up 前先从 state 移除，让 Terraform 仅创建 prod 自有 NAS
-deploy-diting-prod: update-deploy-engine
-	@if [ ! -f "$(CONFIG_ROOT)/terraform-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).tfvars" ]; then \
-		echo "错误: 请先创建 config/terraform-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).tfvars（可参考 config/terraform-diting-dev.tfvars）"; exit 1; \
-	fi
+deploy-diting-prod: update-deploy-engine check-deploy-prereqs
+	@echo ""
+	@echo "=========================================="
+	@echo "  双环境 Up：①新加坡代理(sg-proxy) ②香港 prod"
+	@echo "=========================================="
 	@{ \
-		_LOG="/tmp/deploy-diting-prod-debug.log"; \
 		_TF="$(CURDIR)/$(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud"; \
 		_TF_STATE="$$_TF/terraform.tfstate"; \
-		_EX=1; [ -f "$$_TF_STATE" ] && _EX=0; \
-		echo "{\"sessionId\":\"9c44dd\",\"hypothesisId\":\"H1\",\"location\":\"Makefile:deploy-diting-prod\",\"message\":\"nas-pre\",\"data\":{\"tf_state_path\":\"$$_TF_STATE\",\"state_file_exists\":$$_EX},\"timestamp\":$$(date +%s000)}" >> "$$_LOG" 2>/dev/null || true; \
-		if [ "$$_EX" = "0" ]; then \
-			_SHOW_OUT=$$(cd "$$_TF" && terraform state show 'module.nas.alicloud_nas_access_group.main[0]' 2>&1); \
-			_SHOW_EC=$$?; \
-			_OUT_LEN=$$(echo "$$_SHOW_OUT" | wc -c | tr -d ' '); \
-			echo "{\"sessionId\":\"9c44dd\",\"hypothesisId\":\"H2\",\"message\":\"state-show\",\"data\":{\"exit_code\":$$_SHOW_EC,\"out_len\":$$_OUT_LEN},\"timestamp\":$$(date +%s000)}" >> "$$_LOG" 2>/dev/null || true; \
-			_GREP_MATCH=0; echo "$$_SHOW_OUT" | grep -q 'diting_nas_group_dev' && _GREP_MATCH=1; \
-			echo "{\"sessionId\":\"9c44dd\",\"hypothesisId\":\"H3\",\"message\":\"grep-result\",\"data\":{\"grep_matched\":$$_GREP_MATCH},\"timestamp\":$$(date +%s000)}" >> "$$_LOG" 2>/dev/null || true; \
-			if [ "$$_GREP_MATCH" = "1" ]; then \
+		if [ -f "$$_TF_STATE" ] && [ ! -s "$$_TF_STATE" ]; then rm -f "$$_TF_STATE"; fi; \
+		if [ -f "$$_TF_STATE" ]; then \
+			_SHOW_OUT=$$(cd "$$_TF" && terraform state show 'module.nas.alicloud_nas_access_group.main[0]' 2>&1) || true; \
+			if echo "$$_SHOW_OUT" | grep -q 'diting_nas_group_dev'; then \
 				echo "[prod-up] state 中 NAS 为 dev 共享（diting_nas_group_dev），先从 state 移除再 deploy，避免 replace 时误删"; \
-				echo "{\"sessionId\":\"9c44dd\",\"hypothesisId\":\"H4\",\"message\":\"entered-then-will-rm\",\"data\":{},\"timestamp\":$$(date +%s000)}" >> "$$_LOG" 2>/dev/null || true; \
 				(cd "$$_TF" && terraform state rm 'module.nas.alicloud_nas_access_group.main[0]'); \
-				_RM_EC=$$?; \
-				echo "{\"sessionId\":\"9c44dd\",\"hypothesisId\":\"H5\",\"message\":\"state-rm-done\",\"data\":{\"exit_code\":$$_RM_EC},\"timestamp\":$$(date +%s000)}" >> "$$_LOG" 2>/dev/null || true; \
 			fi; \
 		fi; \
 	}
 	@if scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
 		export TF_VAR_use_existing_data_disk_id=$$(scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)"); \
+		echo "[prod-up] 复用本地 prod.disk_id: $$TF_VAR_use_existing_data_disk_id"; \
 		(cd $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud && terraform state rm 'alicloud_disk.prod_data[0]' -state=terraform.tfstate 2>/dev/null) || true; \
 	else \
-		echo "[prod-up] 数据盘不存在，先创建数据盘..."; \
 		_REGION=$$(grep -E '^\s*region\s*=' "$(CONFIG_ROOT)/terraform-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).tfvars" 2>/dev/null | head -1 | sed -E 's/^[^=]*=\s*"?([^"]+)"?.*/\1/' | tr -d ' '); \
 		[ -z "$$_REGION" ] && _REGION=cn-hongkong; \
 		export ALICLOUD_REGION="$$_REGION"; \
-		(cd $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud && \
-			terraform init && \
-			terraform apply -target=alicloud_disk.prod_data -auto-approve \
-				-var-file="$(CONFIG_ROOT)/terraform-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).tfvars" \
-				-var=env_id=$(PROD_DATA_ENV_ENV) \
-				-var=project=$(PROD_DATA_ENV_PROJECT) \
-				-var=region="$$_REGION" \
-				-var=config_file="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-		_DISK_ID=$$(scripts/tf-output-safe.sh data_disk_id $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud); \
+		_TF="$(CURDIR)/$(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud"; \
+		if [ -f "$$_TF/terraform.tfstate" ] && [ ! -s "$$_TF/terraform.tfstate" ]; then rm -f "$$_TF/terraform.tfstate"; fi; \
+		(cd "$$_TF" && terraform init -backend-config="prefix=$(PROD_DATA_ENV_PROJECT)/$(PROD_DATA_ENV_ENV)" -reconfigure -input=false -no-color > /dev/null) || true; \
+		_DISK_ID=$$(scripts/resolve-disk-id-for-deploy.sh "$$_TF" "$(DISK_ID_FILE)" 2>/dev/null || true); \
 		if [ -n "$$_DISK_ID" ] && echo "$$_DISK_ID" | grep -qE '^d-[a-z0-9]+$$'; then \
 			printf '%s' "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
-			echo "[prod-up] 数据盘已创建: $$_DISK_ID"; \
+			export TF_VAR_use_existing_data_disk_id="$$_DISK_ID"; \
+			echo "[prod-up] 从 OSS remote state 复用数据盘: $$_DISK_ID（已写入 prod.disk_id）"; \
+		else \
+			echo "[prod-up] remote state 无数据盘，创建新盘..."; \
+			(cd "$$_TF" && \
+				terraform apply -target=alicloud_disk.prod_data -auto-approve \
+					-var-file="$(CONFIG_ROOT)/terraform-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).tfvars" \
+					-var=env_id=$(PROD_DATA_ENV_ENV) \
+					-var=project=$(PROD_DATA_ENV_PROJECT) \
+					-var=region="$$_REGION" \
+					-var=config_file="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
+			_DISK_ID=$$(scripts/tf-output-safe.sh data_disk_id "$$_TF"); \
+			if [ -n "$$_DISK_ID" ] && echo "$$_DISK_ID" | grep -qE '^d-[a-z0-9]+$$'; then \
+				printf '%s' "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
+				echo "[prod-up] 数据盘已创建: $$_DISK_ID"; \
+			fi; \
 		fi; \
 	fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  [1/2] 新加坡 Anthropic 代理（env=sg-proxy · STACK=proxy）"
+	@echo "=========================================="
+	@$(MAKE) deploy-sg-anthropic-proxy
+	@echo ""
+	@echo "=========================================="
+	@echo "  [2/2] 香港 prod K3s 集群（env=prod · STACK=base）"
+	@echo "=========================================="
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
-	@$(MAKE) deploy-sg-anthropic-proxy-if-enabled
 	@echo ""
 	@echo "=========================================="
 	@echo "  注册 kubeconfig 到 kubecm 并切换当前 context"
@@ -193,7 +217,12 @@ deploy-diting-prod: update-deploy-engine
 	@echo "=========================================="
 	@CONFIG_ROOT="$(CONFIG_ROOT)" PROJECT=$(PROD_DATA_ENV_PROJECT) ENV=$(PROD_DATA_ENV_ENV) \
 		CONN_FILE="$(CONN_FILE)" bash "$(CURDIR)/scripts/platform-step03-deploy-stack.sh"
-	@$(MAKE) sync-anthropic-proxy-if-enabled
+	@echo ""
+	@echo "=========================================="
+	@echo "  同步 Anthropic 代理到 Copilot 并验收双环境"
+	@echo "=========================================="
+	@$(MAKE) sync-anthropic-proxy-to-copilot
+	@$(MAKE) verify-sg-anthropic-proxy
 	@$(MAKE) -f $(CURDIR)/Makefile prod-write-conn
 	@echo ""
 	@echo "=========================================="
@@ -327,10 +356,20 @@ down-diting-prod:
 			(cd "$$_TF" && terraform state rm 'module.nas.alicloud_nas_access_group.main[0]' -state=terraform.tfstate) || true; \
 		fi; \
 	fi
-	@$(MAKE) down-anthropic-proxy-if-enabled
-	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@echo ""
+	@echo "=========================================="
+	@echo "  双环境 Down：①新加坡代理 ②香港 prod（各失败仍继续，末步汇总）"
+	@echo "=========================================="
+	@_proxy_down=0; _hk_down=0; \
+	echo "▶ [1/2] 回收新加坡代理 ECS+EIP（diting/sg-proxy · STACK=proxy）"; \
+	$(MAKE) down-sg-anthropic-proxy || { echo "❌ 新加坡代理 Down 失败"; _proxy_down=1; }; \
+	echo "▶ [2/2] 回收香港 prod ECS+EIP（diting/prod · STACK=base）"; \
+	CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) down $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || { echo "❌ 香港 prod Down 失败"; _hk_down=1; }; \
+	if [ "$$_proxy_down" = "1" ] || [ "$$_hk_down" = "1" ]; then \
+		echo "❌ make down diting prod 未完全成功（proxy=$$_proxy_down hk=$$_hk_down）"; exit 1; \
+	fi
 	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
-	@echo "make down diting prod OK（香港 + 新加坡代理 ECS/EIP 已回收；kubecm 已移除；prod 数据盘与静态 PV 保留）"
+	@echo "make down diting prod OK（新加坡代理 + 香港 prod ECS/EIP 已回收；kubecm 已移除；prod 数据盘与静态 PV 保留）"
 
 # ============================================================================
 # v2 多 stack（P 轨）— diting-infra 壳调 deploy-engine 新 target
@@ -466,22 +505,33 @@ platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-te
 
 # Copilot 部署加速：依赖层 Dockerfile · 仅推 sha · ACR 已有则跳过构建 · CI 构建 + 本地 helm-only
 .PHONY: copilot-build-push copilot-build-push-if-needed copilot-helm-upgrade copilot-deploy-fast
-.PHONY: copilot-smoke-url copilot-sync-smtp copilot-pg-deploy
+.PHONY: copilot-smoke-url copilot-sync-smtp copilot-pg-deploy copilot-sync-tag-from-cluster
 copilot-sync-smtp:
 	@bash scripts/copilot-sync-smtp-from-src-env.sh
+
+copilot-sync-tag-from-cluster:
+	@chmod +x scripts/copilot-sync-image-tag-from-cluster.sh scripts/copilot-sync-image-tag-to-config.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-sync-image-tag-from-cluster.sh
+
 copilot-build-push:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	_tag="$${COPILOT_IMAGE_TAG:-$$(git -C "$$root/../diting-src" rev-parse --short HEAD 2>/dev/null || echo latest)}"; \
+	chmod +x "$$root/scripts/copilot-resolve-image-tag.sh"; \
+	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-resolve-image-tag.sh")}"; \
+	echo "▶ [copilot-build-push] tag=$$_tag"; \
 	$(MAKE) -C "$$root/../diting-src" push-copilot-image \
 		DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}" COPILOT_IMAGE_TAG="$$_tag"
 
-# ACR 已有同 tag 且未设 COPILOT_FORCE_BUILD=1 时跳过 build/push
+# 内容寻址 tag：ACR 已有同 tag 才跳过；脏工作区自动 -d<hash>，避免旧镜像被同名覆盖
 copilot-build-push-if-needed:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	_tag="$${COPILOT_IMAGE_TAG:-$$(git -C "$$root/../diting-src" rev-parse --short HEAD 2>/dev/null || echo latest)}"; \
+	chmod +x "$$root/scripts/copilot-resolve-image-tag.sh"; \
+	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-resolve-image-tag.sh")}"; \
+	export COPILOT_IMAGE_TAG="$$_tag"; \
 	if [ "$${COPILOT_FORCE_BUILD:-0}" = "1" ]; then \
 	  echo "▶ [copilot] COPILOT_FORCE_BUILD=1 · 强制构建推送 $$_tag"; \
 	  $(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
+	elif [ "$${COPILOT_SKIP_BUILD:-0}" = "1" ]; then \
+	  echo "▶ [copilot] COPILOT_SKIP_BUILD=1 · 跳过构建（tag=$$_tag）"; \
 	elif bash "$$root/scripts/copilot-acr-image-exists.sh" "$$_tag"; then \
 	  echo "▶ [copilot] ACR 已有 $$_tag · 跳过构建推送"; \
 	else \
@@ -491,14 +541,14 @@ copilot-build-push-if-needed:
 
 # 仅 Helm + rollout（镜像已由 CI/此前 push 提供）
 copilot-helm-upgrade:
-	@chmod +x scripts/copilot-helm-upgrade.sh scripts/copilot-sync-ai-from-src-env.sh
+	@chmod +x scripts/copilot-helm-upgrade.sh scripts/copilot-sync-ai-from-src-env.sh \
+	  scripts/copilot-resolve-image-tag.sh scripts/copilot-sync-image-tag-to-config.sh
 	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" \
-	  COPILOT_IMAGE_TAG="$${COPILOT_IMAGE_TAG:-$$(git -C "$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))/../diting-src" rev-parse --short HEAD 2>/dev/null)}" \
 	  bash scripts/copilot-helm-upgrade.sh
 
-# 推荐日常：智能 build（如需）+ Helm；纯配置变更可 COPILOT_SKIP_BUILD=1 make copilot-deploy-fast
+# 推荐日常：内容 tag 构建 + Helm + 回写 diting-prod.yaml
 copilot-deploy-fast: copilot-build-push-if-needed copilot-helm-upgrade
-	@echo "✅ [copilot-deploy-fast] 完成"
+	@echo "✅ [copilot-deploy-fast] 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"
 
 copilot-pg-deploy:
 	@chmod +x scripts/copilot-ensure-pg-db.sh scripts/copilot-pg-prod-deploy.sh \
@@ -588,7 +638,7 @@ sync-anthropic-proxy-to-copilot:
 	@chmod +x scripts/sync-anthropic-proxy-to-copilot.sh
 	@bash scripts/sync-anthropic-proxy-to-copilot.sh
 
-# 确保新加坡代理可用（已存在且健康则复用，不重复创建 ECS/EIP）；helm 注入在 platform-stack 之后
+# 非 prod 路径可选开关；make deploy diting prod 直接调用 deploy-sg-anthropic-proxy（强制双环境）
 deploy-sg-anthropic-proxy-if-enabled:
 	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	if [ "$$_en" = "true" ]; then \
@@ -610,13 +660,14 @@ sync-anthropic-proxy-if-enabled:
 # 兼容旧 target 名
 deploy-anthropic-proxy-if-enabled: deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled
 
+# 非 prod 路径可选开关；make down diting prod 直接调用 down-sg-anthropic-proxy（强制双环境）
 down-anthropic-proxy-if-enabled:
 	@_en=$$(yq eval '.anthropic_proxy.enabled // false' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
 	if [ "$$_en" = "true" ]; then \
 		echo "▶ [prod-down] anthropic_proxy.enabled=true → 回收新加坡代理 ECS+EIP"; \
 		$(MAKE) down-sg-anthropic-proxy; \
 	else \
-		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理 Down"; \
+		echo "ℹ️  anthropic_proxy.enabled=false，跳过新加坡代理 Down（make down diting prod 不受此开关影响）"; \
 	fi
 
 # 波次四：持久化 + 漏斗降级移除 + 采集数据页 + Opus 对话选模型（镜像正式部署，禁止仅热修）

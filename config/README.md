@@ -2,6 +2,50 @@
 
 本目录存放环境与部署配置。**拉代码后**按下列步骤即可完成配置并运行。
 
+## 新机器拉仓 SOP（同样 `.env` 丝滑 Up/Down）
+
+在**任意目录**克隆本仓后，用**同一阿里云账号**的凭证即可复用 OSS 上的 Terraform state（`diting/prod` + `diting/sg-proxy`），无需复制本机 `prod.conn` / `prod.disk_id` / `sg-proxy.conn`。
+
+```bash
+git clone <diting-infra-url> && cd diting-infra
+git submodule update --init --remote deploy-engine
+
+make init-local-config          # 生成 .env + terraform-diting-prod.tfvars（不覆盖已有）
+# 编辑 .env：ALICLOUD_ACCESS_KEY、ALICLOUD_SECRET_KEY、TF_VAR_instance_password
+# 可选：ACR_*、kubecm 等（见 .env.template）
+
+make check-deploy-prereqs       # 工具链与子模块自检
+make deploy diting prod         # 新加坡代理 → 香港 K3s → Platform Stack → 代理验收
+# ...
+make down diting prod           # 卸载 Helm → 销新加坡代理 → 销香港 prod（保留数据盘）
+```
+
+| 文件 | 是否随 Git | 换机说明 |
+|------|------------|----------|
+| `.env` | 否（gitignore） | **必须**在新机复制或重新填写（同 AK 即可） |
+| `config/terraform-diting-prod.tfvars` | 否 | `make init-local-config` 从 example 复制 |
+| `config/terraform-diting-sg-proxy.tfvars` | **是** | 已绑定账号内 VPC/NAS ID，同账号直接可用 |
+| `prod.disk_id` | 否 | 无则从 OSS state 自动解析并写入 |
+| `prod.conn` / `sg-proxy.conn` | 否 | deploy 后自动生成，down 时 sg-proxy.conn 会删除 |
+
+**工具链**：`terraform`、`helm`、`kubectl`、`yq`、`nc`（代理健康检查）；建议安装 `aliyun` CLI（state 为空时 down 回收孤儿 proxy ECS）。
+
+**子模块**：`deploy-engine` 须在独立仓提交并 push 后，本仓执行 `make update-deploy-engine` 才能在其他机器拉到最新 Makefile/state 修复。
+
+## 双环境契约（make deploy / down diting prod）
+
+`make deploy diting prod` 与 `make down diting prod` **强制联动两套 Terraform state**，不可只操作其一：
+
+| 环境 | state prefix | tfvars | 资源 |
+|------|----------------|--------|------|
+| 香港 prod | `diting/prod` | `terraform-diting-prod.tfvars` | K3s base ECS+EIP、数据盘、Platform Stack |
+| 新加坡代理 | `diting/sg-proxy` | `terraform-diting-sg-proxy.tfvars` | Anthropic 出口 proxy ECS+EIP（`STACK=proxy`） |
+
+**Up 顺序**：新加坡代理 → 香港 K3s → platform-stack → `sync-anthropic-proxy-to-copilot` → 代理健康检查。  
+**Down 顺序**：卸载 Helm/栈 → 销新加坡代理 → 销香港 prod（任一步失败仍继续尝试下一步，末步汇总）。  
+**孤儿回收**：若 OSS state `diting/sg-proxy` 为空但云上仍有 `*-proxy-sg-proxy` ECS（常见于 deploy 走 `sg-proxy.conn` 健康复用、未写入 state），`down-sg-anthropic-proxy` 会用 `aliyun` CLI 补删。  
+凭证：`.env` 中 `ALICLOUD_*` + `TF_VAR_instance_password`（两套环境共用）。
+
 ## 前置依赖（make deploy diting prod）
 
 部署 Diting Stack 与数据库（PG/Redis/TimescaleDB）依赖 **yq** 解析 `diting-prod.yaml`。未安装时部署会报错并提示安装方式。

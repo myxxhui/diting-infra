@@ -288,6 +288,18 @@ copilot:
       - id: l4-turnover-accel-eod
         schedule: "30 15 * * 1-5"
         activeDeadlineSeconds: 3600
+      - id: l4-block-trade-eod
+        schedule: "0 18 * * 1-5"
+        activeDeadlineSeconds: 3600
+      - id: l4-retail-concentration-eod
+        schedule: "30 20 * * 1-5"
+        activeDeadlineSeconds: 3600
+      - id: l4-insider-sell-eod
+        schedule: "30 20 * * 1-5"
+        activeDeadlineSeconds: 3600
+      - id: l4-etf-redemption-morning
+        schedule: "30 8 * * 2-6"
+        activeDeadlineSeconds: 3600
       - id: l4-atr-bars-sync
         schedule: "0 16 * * 1-5"
         activeDeadlineSeconds: 900

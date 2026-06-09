@@ -13,7 +13,6 @@ global:
   k3s:
     apiServer:
       domain: "k3s-diting-prod.example.com"
-
 # deploy-engine 用：不在此处部署数据库，由 deploy-stack.sh 用官方 Chart 部署
 # 新加坡 Anthropic 出口代理（make deploy/down diting prod 强制联动，勿设 enabled: false）
 anthropic_proxy:
@@ -22,7 +21,6 @@ anthropic_proxy:
   stack_id: proxy
   port: 3128
   user: ditingproxy
-
 deploy_control:
   # deploy-engine 步骤 4：仅校验/确保 K3s 存储插件；DB Helm 由 platform-step03 统一部署在 platform（勿在 default 重复安装）
   enable_timescaledb: false
@@ -39,14 +37,12 @@ deploy_control:
   redis_storage:
     size: "10Gi"
     storage_class: ""
-
 # Diting Stack：1) 静态存储 Chart  2) 数据库由脚本用官方 Chart 部署
 stack:
   enabled: true
   chart_path: "charts/diting-stack"
   release_name: "diting-stack"
   namespace: "platform"
-
   # 仅静态 PV/PVC + 初始化 Job（与 diting-stack Chart values 同构）
   storage:
     dataPath: /mnt/titan-data/postgres
@@ -113,7 +109,6 @@ stack:
         namespace: platform
         accessMode: ReadWriteOnce
         storageRequest: 10Gi
-
   # 采集 Job（云原生）：集群内跑 diting-ingest 镜像，启用后不再依赖 REPO_I_ROOT
   # 详见 docs/ingest-cloud-native.md；镜像来自项目 ACR，本地构建后 make push-images 推送。
   # 若用 tag: latest 仍看到旧行为：节点可能缓存了 digest；可改为唯一 tag（如日期或 git sha），构建时打同一 tag 并 push，再 deploy。
@@ -137,11 +132,9 @@ stack:
     jqdataDateEnd: "2025-08-01"
     jqdataUser: "13031539952"
     jqdataPassword: "Hui123123"
-
   # 建表（Schema Init）：由 Chart 内 Job 执行 L1/L2 建表，与 ingest 同源连接；显式开启避免合并时被覆盖
   schemaInit:
     enabled: true
-
   # 语义分类器-A（Module A）：部署名 diting-semantic-classifier-a；连接 L1/L2 与 ingest 同源，由 Secret 注入；指定标的由 ConfigMap 挂载
   # 使用生产数据（非 Mock）必须：(1) 若 L1/L2 在集群外，在此覆盖 timescaleHost、postgresL2Host 等指向生产库；(2) chart config/diting_symbols.txt 中已有标的列表（需与 diting-src 一致时可执行 make sync-semantic-classifier-a-symbols）
   # 生产启用时需先构建并推送镜像（diting-src: make build-module-a / push-module-a），并配置 imagePullSecrets
@@ -158,14 +151,14 @@ stack:
     postgresL2Password: "postgres"
     runLoop: true
     runLoopIntervalSec: 86400
-
   # Copilot 副驾驶 Web：NodePort 暴露前端监控（持仓体检 /health-dashboard、单股 /health-detail/601138）
   copilot:
     enabled: true
     image:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
-      # git short sha；ACR 仅推 sha（不默认推 :latest）· 见 make copilot-deploy-fast
-      tag: be1f47c6
+      # 与线上一致 · make copilot-deploy-fast 会按 copilot-resolve-image-tag.sh 回写
+      # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
+      tag: be1f47c6-d192135e
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
@@ -242,6 +235,18 @@ stack:
         - id: l4-turnover-accel-eod
           schedule: "30 15 * * 1-5"
           activeDeadlineSeconds: 3600
+        - id: l4-block-trade-eod
+          schedule: "0 18 * * 1-5"
+          activeDeadlineSeconds: 3600
+        - id: l4-retail-concentration-eod
+          schedule: "30 20 * * 1-5"
+          activeDeadlineSeconds: 3600
+        - id: l4-insider-sell-eod
+          schedule: "30 20 * * 1-5"
+          activeDeadlineSeconds: 3600
+        - id: l4-etf-redemption-morning
+          schedule: "30 8 * * 2-6"
+          activeDeadlineSeconds: 3600
         - id: l4-atr-bars-sync
           schedule: "0 16 * * 1-5"
           activeDeadlineSeconds: 900
@@ -270,7 +275,6 @@ stack:
       defaults:
         crawl_years: [2022, 2023, 2024, 2025]
         throttle_sec: 0.6
-
   # 数据库部署参数（供脚本调用 bitnami/postgresql、bitnami/redis 使用）
   # 服务暴露方式由此处与 Chart 控制，Makefile 仅从本配置读取并传递 helm，不写死（见系统规则「部署内容由配置与 Chart 控制」）
   databases:
@@ -300,7 +304,6 @@ stack:
     # Redis 部署与暴露由 config/redis-values-prod.yaml 覆盖 Bitnami Chart，Makefile 仅 -f 该文件
     redis:
       enabled: true
-
 # 后半部分：Up 后是否执行数据采集（K3s Job 走 diting-stack/templates/ingest，非 charts/ingest）
 data_ingestion:
   enabled: true

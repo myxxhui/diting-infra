@@ -65,10 +65,22 @@ _helm_infra_stack_upgrade_or_install() {
 _wait_pvc_bound() {
   local pvc_name="$1"
   local timeout_sec="${2:-120}"
-  if kubectl get pvc "$pvc_name" -n "$STACK_NS" >/dev/null 2>&1; then
-    kubectl wait --for=jsonpath='{.status.phase}'=Bound "pvc/$pvc_name" -n "$STACK_NS" --timeout="${timeout_sec}s"
-    echo "  [基础设施第一梯队] PVC $STACK_NS/$pvc_name Bound ✅"
+  local interval=2 elapsed=0 phase=""
+  if ! kubectl get pvc "$pvc_name" -n "$STACK_NS" >/dev/null 2>&1; then
+    return 0
   fi
+  # kubectl <1.27 不支持 wait --for=jsonpath；轮询 phase 以兼容 macOS 旧客户端
+  while [ "$elapsed" -lt "$timeout_sec" ]; do
+    phase="$(kubectl get pvc "$pvc_name" -n "$STACK_NS" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    if [ "$phase" = "Bound" ]; then
+      echo "  [基础设施第一梯队] PVC $STACK_NS/$pvc_name Bound ✅"
+      return 0
+    fi
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+  echo "  [基础设施第一梯队] PVC $STACK_NS/$pvc_name 等待 Bound 超时 (${timeout_sec}s，当前 phase=${phase:-unknown})"
+  return 1
 }
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -127,7 +139,7 @@ echo "  [P1~P4] diting-platform-base Ready ✅"
 
 # ── 4) diting-stack 仅 storage（禁用业务组件）────────────────────────────
 TMP_STACK="$(mktemp)"
-trap '/usr/bin/rm -f "$TMP_STACK" "$TMP_FULL"' EXIT INT TERM
+trap 'rm -f "$TMP_STACK"' EXIT INT TERM
 yq eval '{"storage": .stack.storage, "copilot": (.stack.copilot | .enabled = false), "schemaInit": (.stack.schemaInit | .enabled = false), "module_a": (.stack.module_a | .enabled = false), "ingest": (.stack.ingest | .enabled = false)}' "$CFG" > "$TMP_STACK"
 yq eval -i "
   .storage.timescaledb.pvc.namespace = \"${STACK_NS}\" |
@@ -138,8 +150,8 @@ yq eval -i "
 " "$TMP_STACK"
 
 _helm_infra_stack_upgrade_or_install diting-stack "$INFRA_ROOT/charts/diting-stack" -f "$TMP_STACK"
-/usr/bin/rm -f "$TMP_STACK"
-trap '/usr/bin/rm -f "$TMP_FULL"' EXIT INT TERM
+rm -f "$TMP_STACK"
+trap - EXIT INT TERM
 
 _wait_pvc_bound data-timescaledb-postgresql-0 120
 _wait_pvc_bound data-postgresql-l2-0 120
@@ -218,6 +230,7 @@ echo ""
 echo "========== [业务第二梯队] 开始 =========="
 
 TMP_FULL="$(mktemp)"
+trap 'rm -f "$TMP_FULL"' EXIT INT TERM
 yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP_FULL"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
@@ -239,7 +252,7 @@ if yq eval '.copilot.enabled // false' "$TMP_FULL" | grep -q true; then
   " "$TMP_FULL"
 fi
 helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_FULL" "${HELM_BIZ_T2_OPTS[@]}"
-/usr/bin/rm -f "$TMP_FULL"
+rm -f "$TMP_FULL"
 trap - EXIT INT TERM
 
 echo "  [S4/S5] copilot / schema-init / module_a / ingest 已提交 @ ${STACK_NS}"

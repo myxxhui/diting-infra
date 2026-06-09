@@ -18,6 +18,10 @@ spec:
       labels:
         app: diting
         component: copilot
+        diting.io/copilot-image-tag: {{ .Values.copilot.image.tag | quote }}
+      annotations:
+        diting.io/copilot-image-tag: {{ .Values.copilot.image.tag | quote }}
+        diting.io/copilot-image-repository: {{ .Values.copilot.image.repository | quote }}
     spec:
       {{- with .Values.copilot.imagePullSecrets }}
       imagePullSecrets:
