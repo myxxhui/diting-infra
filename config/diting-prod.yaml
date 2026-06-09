@@ -165,7 +165,7 @@ stack:
     image:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
       # git short sha；ACR 仅推 sha（不默认推 :latest）· 见 make copilot-deploy-fast
-      tag: efbf06ff
+      tag: be1f47c6
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
