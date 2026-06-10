@@ -89,7 +89,7 @@ fi
 
 TMP_VALUES="$(mktemp)"
 trap 'rm -f "$TMP_VALUES"' EXIT
-yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": (.stack.copilot // {})}' "$CFG" > "$TMP_VALUES"
+yq eval '{"storage": .stack.storage, "opensearch": .stack.opensearch, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": (.stack.copilot // {})}' "$CFG" > "$TMP_VALUES"
 yq eval -i "
   .ingest.enabled = true |
   .ingest.triggerRunAt = \"${RUN_ID}\" |

@@ -16,5 +16,5 @@ spec:
   backoffLimit: 2
   template:
     spec:
-      {{- include "diting.executingT0JobPod" (list . "bootstrap-sync" 3600) | nindent 6 }}
+      {{- include "diting.executingT0JobPod" (list . (dict "id" "bootstrap-sync")) | nindent 6 }}
 {{- end }}

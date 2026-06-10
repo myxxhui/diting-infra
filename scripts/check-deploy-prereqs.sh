@@ -62,6 +62,19 @@ done
 
 if command -v aliyun >/dev/null 2>&1; then
   ok "aliyun CLI 可用（down 时孤儿 proxy ECS 回收更可靠）"
+  # shellcheck disable=SC1091
+  set -a; source .env 2>/dev/null || true; set +a
+  _bal="$(aliyun bssopenapi QueryAccountBalance 2>/dev/null \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Data',{}).get('AvailableCashAmount',''))" 2>/dev/null || true)"
+  if [ -n "$_bal" ]; then
+    if python3 -c "import sys; sys.exit(0 if float('${_bal}') >= 100 else 1)"; then
+      ok "阿里云可用余额 ${_bal} CNY（≥100，可创建按量 ECS）"
+    else
+      fail "阿里云可用余额 ${_bal} CNY 不足 100 · 充值后再 deploy（InvalidAccountStatus.NotEnoughBalance）"
+    fi
+  else
+    warn "无法读取阿里云余额 · deploy 可能因 NotEnoughBalance 失败"
+  fi
 else
   warn "未安装 aliyun CLI · down-sg-anthropic-proxy 在 state 为空时可能无法回收云上孤儿实例"
 fi

@@ -1,0 +1,27 @@
+{{- if .Values.opensearch.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.opensearch.serviceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting
+    component: opensearch
+spec:
+  type: {{ .Values.opensearch.service.type }}
+  {{- if and (eq .Values.opensearch.service.type "NodePort") .Values.opensearch.service.nodePort }}
+  ports:
+  - name: http
+    port: {{ .Values.opensearch.service.port }}
+    targetPort: http
+    nodePort: {{ .Values.opensearch.service.nodePort }}
+  {{- else }}
+  ports:
+  - name: http
+    port: {{ .Values.opensearch.service.port }}
+    targetPort: http
+  {{- end }}
+  selector:
+    app: diting
+    component: opensearch
+{{- end }}

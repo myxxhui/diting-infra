@@ -231,7 +231,7 @@ echo "========== [业务第二梯队] 开始 =========="
 
 TMP_FULL="$(mktemp)"
 trap 'rm -f "$TMP_FULL"' EXIT INT TERM
-yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP_FULL"
+yq eval '{"storage": .stack.storage, "opensearch": .stack.opensearch, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP_FULL"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |

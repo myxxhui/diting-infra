@@ -117,6 +117,29 @@ stack:
         namespace: platform
         accessMode: ReadWriteOnce
         storageRequest: 10Gi
+    # OpenSearch 长文索引 · [Ref: 29_ §1.3]
+    opensearch:
+      enabled: true
+      pv:
+        name: diting-opensearch-data-pv
+        capacity: 20Gi
+        subPath: opensearch
+        reclaimPolicy: Retain
+      pvc:
+        name: diting-opensearch-data
+        namespace: platform
+        accessMode: ReadWriteOnce
+        storageRequest: 20Gi
+  # OpenSearch 单节点 · Phase 2 基础设施 [Ref: 29_ §6.2]
+  opensearch:
+    enabled: true
+    replicas: 1
+    serviceName: opensearch
+    service:
+      type: NodePort
+      port: 9200
+      nodePort: 30200
+    javaOpts: "-Xms512m -Xmx512m"
   # 采集 Job（云原生）：集群内跑 diting-ingest 镜像，启用后不再依赖 REPO_I_ROOT
   # 详见 docs/ingest-cloud-native.md；镜像来自项目 ACR，本地构建后 make push-images 推送。
   # 若用 tag: latest 仍看到旧行为：节点可能缓存了 digest；可改为唯一 tag（如日期或 git sha），构建时打同一 tag 并 push，再 deploy。
@@ -182,6 +205,20 @@ stack:
     redisHost: "redis-master.platform.svc.cluster.local"
     redisPort: "6379"
     redisDb: "0"
+    arqRedisDb: "1"
+    # ARQ Worker · Cron → enqueue [Ref: 29_ §1.4 · §7 Phase 1]
+    arqWorker:
+      enabled: true
+      replicas: 1
+      maxJobs: "8"
+      retryBackoff: "5,20,60"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1536Mi"
+          cpu: "1000m"
     # 行情雷达模式 C 深度研报：T2 Opus 开关 + 模型；anthropicApiKey 由
     # copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入（密钥不入库）
     ai:
@@ -212,6 +249,8 @@ stack:
     executingT0Jobs:
       enabled: true
       bootstrapHook: false
+      enqueueJobIdPrefixes:
+        - "l3-"
       cronjobs:
         - id: quote-intraday
           schedule: "*/5 9-14 * * 1-5"
@@ -264,6 +303,9 @@ stack:
         - id: l4-atr-bars-sync
           schedule: "0 16 * * 1-5"
           activeDeadlineSeconds: 900
+        - id: l3-fii-twse-monthly
+          schedule: "0 8 5 * *"
+          activeDeadlineSeconds: 1800
     # 28_ daily-pipeline / migrate 曾 OOM(137) · 与 values 默认对齐 1.5Gi
     resources:
       requests:

@@ -14,7 +14,7 @@ set -a && source "$SRC_ENV" && set +a
 
 _VALUES_FILE="$(mktemp)"
 trap 'rm -f "$_VALUES_FILE"' EXIT INT TERM
-yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$_VALUES_FILE"
+yq eval '{"storage": .stack.storage, "opensearch": .stack.opensearch, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$_VALUES_FILE"
 yq eval -i "
   .copilot.redisHost = \"redis-master.${STACK_NS}.svc.cluster.local\" |
   .copilot.redisPort = \"6379\" |

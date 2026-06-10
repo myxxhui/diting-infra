@@ -132,6 +132,42 @@ storage:
       accessMode: ReadWriteOnce
       storageRequest: 10Gi
 
+  # OpenSearch 长文索引 · ESSD 子路径 Retain [Ref: 29_ §1.3]
+  opensearch:
+    enabled: false
+    pv:
+      name: diting-opensearch-data-pv
+      capacity: 20Gi
+      subPath: opensearch
+      reclaimPolicy: Retain
+    pvc:
+      name: diting-opensearch-data
+      namespace: default
+      accessMode: ReadWriteOnce
+      storageRequest: 20Gi
+
+# OpenSearch 单节点 [Ref: 29_ §6.2]
+opensearch:
+  enabled: false
+  replicas: 1
+  serviceName: opensearch
+  image:
+    repository: opensearchproject/opensearch
+    tag: "2.11.1"
+    pullPolicy: IfNotPresent
+  javaOpts: "-Xms512m -Xmx512m"
+  service:
+    type: ClusterIP
+    port: 9200
+    nodePort: 30200
+  resources:
+    requests:
+      memory: "768Mi"
+      cpu: "250m"
+    limits:
+      memory: "1536Mi"
+      cpu: "1000m"
+
 # 语义分类器-A（Module A）：连接 L1/L2 由 Secret 注入，与 ingest 同源；部署资源名 diting-semantic-classifier-a
 # 使用生产数据（非 Mock）必须：(1) timescaleHost/postgresL2Host 指向含生产数据的库（集群外库请在 config 覆盖）；(2) chart config/diting_symbols.txt 中已有标的列表（与 diting-src 一致时可执行 make sync-semantic-classifier-a-symbols 同步）
 module_a:
@@ -175,6 +211,7 @@ copilot:
   redisHost: "redis-master.default.svc.cluster.local"
   redisPort: "6379"
   redisDb: "0"
+  arqRedisDb: "1"
   # 生产：postgres.enabled=true，库落在 postgresql-l2 的 ESSD 数据盘（与 L2 同实例不同库）
   dbUrl: "sqlite+aiosqlite:////data/copilot.db"
   postgres:
@@ -186,6 +223,19 @@ copilot:
     database: diting_copilot
   alertConsumerEnabled: "true"
   ledgerSchedulerEnabled: "false"
+  # ARQ Worker · Cron enqueue 消费 [Ref: 29_ §1.4]
+  arqWorker:
+    enabled: false
+    replicas: 1
+    maxJobs: "8"
+    retryBackoff: "5,20,60"
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+      limits:
+        memory: "1536Mi"
+        cpu: "1000m"
   radarT0CacheDir: "/data/radar_t0_cache"
   radarT0CacheMaxAgeHours: "24"
   radarT0RetentionDays: "1"
@@ -200,6 +250,7 @@ copilot:
   radarT0Jobs:
     enabled: false
     bootstrapHook: true
+    useArqEnqueue: false
     timeZone: Asia/Shanghai
     startingDeadlineSeconds: 3600
     cronjobs:
@@ -252,6 +303,9 @@ copilot:
   executingT0Jobs:
     enabled: false
     bootstrapHook: true
+    # JL4 直跑；job_id 前缀 l3- 或单条 enqueue:true → ARQ 入队 [Ref: 29_ · 28_ §3.4]
+    enqueueJobIdPrefixes:
+      - "l3-"
     timeZone: Asia/Shanghai
     startingDeadlineSeconds: 3600
     cronjobs:

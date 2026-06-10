@@ -33,7 +33,25 @@ containers:
 - name: radar-t0
   image: "{{ $root.Values.copilot.image.repository }}:{{ $root.Values.copilot.image.tag }}"
   imagePullPolicy: {{ $root.Values.copilot.image.pullPolicy }}
+  {{- if $root.Values.copilot.radarT0Jobs.useArqEnqueue }}
+  command: ["python", "-m", "apps.copilot.jobs.radar_t0", "--enqueue", {{ $jobId | quote }}]
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+  {{- else }}
   command: ["python", "-m", "apps.copilot.jobs.radar_t0", {{ $jobId | quote }}]
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  {{- end }}
   envFrom:
   - secretRef:
       name: diting-copilot-conn
@@ -51,13 +69,6 @@ containers:
   - name: radar-t0-cache
     mountPath: /data/radar_t0_cache
   {{- end }}
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
 volumes:
 {{- if $root.Values.storage.radarT0Cache.enabled }}
 - name: radar-t0-cache

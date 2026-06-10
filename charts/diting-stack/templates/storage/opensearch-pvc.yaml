@@ -1,0 +1,18 @@
+{{- if .Values.storage.opensearch.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.opensearch.pvc.name }}
+  namespace: {{ .Values.storage.opensearch.pvc.namespace | default .Release.Namespace }}
+  labels:
+    app: diting
+    component: opensearch
+spec:
+  accessModes:
+    - {{ .Values.storage.opensearch.pvc.accessMode }}
+  storageClassName: ""
+  volumeName: {{ .Values.storage.opensearch.pv.name }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.opensearch.pvc.storageRequest }}
+{{- end }}

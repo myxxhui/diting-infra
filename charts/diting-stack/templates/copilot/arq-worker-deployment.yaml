@@ -1,0 +1,72 @@
+{{- if and .Values.copilot.enabled .Values.copilot.arqWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diting-copilot-arq-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting
+    component: copilot-arq-worker
+spec:
+  replicas: {{ .Values.copilot.arqWorker.replicas }}
+  selector:
+    matchLabels:
+      app: diting
+      component: copilot-arq-worker
+  template:
+    metadata:
+      labels:
+        app: diting
+        component: copilot-arq-worker
+        diting.io/copilot-image-tag: {{ .Values.copilot.image.tag | quote }}
+    spec:
+      {{- with .Values.copilot.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range . }}
+      - name: {{ if kindIs "string" . }}{{ . | quote }}{{ else }}{{ .name | default "" | quote }}{{ end }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z {{ .Values.copilot.redisHost }} {{ .Values.copilot.redisPort }}; do sleep 2; done
+      {{- if .Values.copilot.postgres.enabled }}
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z {{ .Values.copilot.postgres.host }} {{ .Values.copilot.postgres.port }}; do sleep 2; done
+      {{- end }}
+      {{- if .Values.opensearch.enabled }}
+      - name: wait-for-opensearch
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z {{ .Values.opensearch.serviceName }} {{ .Values.opensearch.service.port }}; do sleep 2; done
+      {{- end }}
+      containers:
+      - name: arq-worker
+        image: "{{ .Values.copilot.image.repository }}:{{ .Values.copilot.image.tag }}"
+        imagePullPolicy: {{ .Values.copilot.image.pullPolicy }}
+        command: ["python", "-m", "apps.copilot.workers.arq_worker"]
+        envFrom:
+        - secretRef:
+            name: diting-copilot-conn
+        env:
+        - name: DEPLOY_REGION
+          value: "cn-hongkong"
+        - name: ARQ_MAX_JOBS
+          value: {{ .Values.copilot.arqWorker.maxJobs | quote }}
+        - name: ARQ_RETRY_BACKOFF
+          value: {{ .Values.copilot.arqWorker.retryBackoff | quote }}
+        resources:
+          {{- toYaml .Values.copilot.arqWorker.resources | nindent 10 }}
+{{- end }}

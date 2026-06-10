@@ -11,6 +11,35 @@ sg_proxy_load_env() {
     source "$infra_root/.env"
     set +a
   fi
+  # Terraform OSS backend 与 alicloud provider 均依赖显式 AK/SK
+  export ALICLOUD_ACCESS_KEY="${ALICLOUD_ACCESS_KEY:-}"
+  export ALICLOUD_SECRET_KEY="${ALICLOUD_SECRET_KEY:-}"
+}
+
+# 创建按量 ECS 前检查账户可用余额（CNY；国际站/按量产品官方阈值 100 元）
+sg_proxy_check_balance() {
+  local min_cny="${1:-100}"
+  if ! command -v aliyun >/dev/null 2>&1; then
+    echo "⚠️  [sg-proxy] 未安装 aliyun CLI，跳过余额预检（deploy 仍可能因 NotEnoughBalance 失败）" >&2
+    return 0
+  fi
+  local available
+  available="$(
+    aliyun bssopenapi QueryAccountBalance 2>/dev/null \
+      | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Data',{}).get('AvailableCashAmount',''))" 2>/dev/null \
+      || true
+  )"
+  if [ -z "$available" ]; then
+    echo "⚠️  [sg-proxy] 无法读取账户余额，跳过预检" >&2
+    return 0
+  fi
+  if python3 -c "import sys; sys.exit(0 if float('${available}') >= float('${min_cny}') else 1)"; then
+    echo "ℹ️  [sg-proxy] 账户可用余额 ${available} CNY（阈值 ${min_cny}）"
+    return 0
+  fi
+  echo "❌ [sg-proxy] 阿里云账户可用余额 ${available} CNY 低于 ${min_cny} CNY，无法创建按量 ECS/EIP" >&2
+  echo "   按量付费要求账户余额不少于 100 元（InvalidAccountStatus.NotEnoughBalance）" >&2
+  return 1
 }
 
 sg_proxy_resolve_password() {
@@ -60,11 +89,77 @@ sg_proxy_state_has_instance() {
   local project="$2"
   local env="$3"
   local tf_dir="$infra_root/deploy-engine/deploy/terraform/alicloud"
+  local state_list
+
+  sg_proxy_load_env "$infra_root"
   sg_proxy_tf_init "$infra_root" "$project" "$env"
-  (
+  state_list="$(
     cd "$tf_dir"
-    terraform state list 2>/dev/null | grep -q 'module\.ecs\.alicloud_instance\.stack\["proxy"\]'
-  )
+    terraform state list 2>/dev/null || true
+  )"
+  if [ -z "$state_list" ]; then
+    return 1
+  fi
+  printf '%s\n' "$state_list" | grep -qE 'module\.ecs\.alicloud_(instance|eip_address)\.stack\["proxy"\]'
+}
+
+# 释放新加坡 region 内未绑定实例的 proxy 相关 Available EIP（失败 apply 遗留）
+sg_proxy_release_available_eips() {
+  local region="${1:-ap-southeast-1}"
+  local proxy_env="${2:-sg-proxy}"
+
+  if ! command -v aliyun >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ALICLOUD_REGION="$region" PROXY_ENV="$proxy_env" python3 - <<'PY'
+import json, os, subprocess, sys
+
+region = os.environ.get("ALICLOUD_REGION", "ap-southeast-1")
+proxy_env = os.environ.get("PROXY_ENV", "sg-proxy")
+suffix = f"-proxy-{proxy_env}"
+
+def run(*args):
+    p = subprocess.run(
+        ["aliyun", *args, "--region", region],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+    )
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.strip() or p.stdout.strip() or "aliyun failed")
+    return json.loads(p.stdout) if p.stdout.strip() else {}
+
+inst_data = run("ecs", "DescribeInstances", "--PageSize", "100")
+bound_ips = set()
+has_proxy_ecs = False
+for inst in inst_data.get("Instances", {}).get("Instance") or []:
+    name = inst.get("InstanceName") or ""
+    if suffix not in name:
+        continue
+    has_proxy_ecs = True
+    eip = (inst.get("EipAddress") or {}).get("IpAddress") or ""
+    if eip:
+        bound_ips.add(eip)
+
+eip_data = run("vpc", "DescribeEipAddresses", "--PageSize", "50")
+released = 0
+for addr in eip_data.get("EipAddresses", {}).get("EipAddress") or []:
+    ip = addr.get("IpAddress") or ""
+    status = addr.get("Status") or ""
+    alloc = addr.get("AllocationId") or ""
+    name = addr.get("Name") or ""
+    if status != "Available" or not alloc:
+        continue
+    if ip in bound_ips:
+        continue
+    # 无 proxy ECS 时释放全部 Available EIP；否则仅释放命名含 proxy 的
+    if (not has_proxy_ecs) or suffix in name or "proxy" in name.lower() or "sg-proxy" in name.lower():
+        print(f"▶ [sg-proxy] 释放失败 apply 遗留 Available EIP {ip} ({alloc})")
+        run("vpc", "ReleaseEipAddress", "--AllocationId", alloc)
+        released += 1
+
+if released:
+    print(f"ℹ️  [sg-proxy] 已释放 {released} 个孤儿 EIP")
+PY
 }
 
 sg_proxy_read_outputs() {

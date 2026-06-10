@@ -167,7 +167,7 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 	@if scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
 		export TF_VAR_use_existing_data_disk_id=$$(scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)"); \
 		echo "[prod-up] 复用本地 prod.disk_id: $$TF_VAR_use_existing_data_disk_id"; \
-		(cd $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud && terraform state rm 'alicloud_disk.prod_data[0]' -state=terraform.tfstate 2>/dev/null) || true; \
+		CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/prod-disk-state-handoff.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV); \
 	else \
 		_REGION=$$(grep -E '^\s*region\s*=' "$(CONFIG_ROOT)/terraform-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).tfvars" 2>/dev/null | head -1 | sed -E 's/^[^=]*=\s*"?([^"]+)"?.*/\1/' | tr -d ' '); \
 		[ -z "$$_REGION" ] && _REGION=cn-hongkong; \
@@ -180,6 +180,7 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 			printf '%s' "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
 			export TF_VAR_use_existing_data_disk_id="$$_DISK_ID"; \
 			echo "[prod-up] 从 OSS remote state 复用数据盘: $$_DISK_ID（已写入 prod.disk_id）"; \
+			CONFIG_ROOT="$(CONFIG_ROOT)" TF_VAR_use_existing_data_disk_id="$$_DISK_ID" bash scripts/prod-disk-state-handoff.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV); \
 		else \
 			echo "[prod-up] remote state 无数据盘，创建新盘..."; \
 			(cd "$$_TF" && \
@@ -196,8 +197,9 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 			fi; \
 		fi; \
 	fi
-	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/terraform-output-safe.sh
+	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/terraform-output-safe.sh scripts/prod-disk-state-handoff.sh
 	@bash scripts/ensure-prod-data-snapshot-policy.sh
+	@CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/prod-disk-state-handoff.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 	@echo ""
 	@echo "=========================================="
 	@echo "  [1/2] 新加坡 Anthropic 代理（env=sg-proxy · STACK=proxy）"
@@ -409,6 +411,7 @@ up-stack: update-deploy-engine
 		export TF_VAR_use_existing_data_disk_id=$$(scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)"); \
 		echo "[up-stack] 复用数据盘 TF_VAR_use_existing_data_disk_id=$$TF_VAR_use_existing_data_disk_id"; \
 	fi; \
+	CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/prod-disk-state-handoff.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true; \
 	if ! CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; then \
 		echo ""; \
 		echo "=========================================="; \
@@ -748,7 +751,7 @@ radar-t0-job-status:
 # 28_ 执行中工作区 · T0 Cron + bootstrap
 .PHONY: executing-t0-cron-install executing-t0-bootstrap-sync executing-t0-job-status
 .PHONY: executing-bars250-bootstrap executing-bars250-verify executing-bars250-deploy
-.PHONY: copilot-executing-workspace-deploy
+.PHONY: copilot-executing-workspace-deploy infra-middleware-verify executing-daily-status
 
 executing-t0-cron-install: copilot-helm-upgrade
 	@echo "✅ [executing-t0-cron-install] Helm 已含 copilot.executingT0Jobs（见 diting-prod.yaml）"
@@ -786,6 +789,14 @@ executing-bars250-deploy: copilot-deploy-fast
 executing-t0-job-status:
 	@KUBECONFIG="$(KUBECONFIG)" kubectl -n platform exec deploy/diting-copilot -- \
 		python -m apps.copilot.jobs.executing_t0 --status
+
+# 29_ §9 · 基础设施中间件验收（Redis / ARQ / OpenSearch / Cron enqueue）
+infra-middleware-verify:
+	@chmod +x scripts/infra-middleware-verify.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/infra-middleware-verify.sh
+
+# 29_ §9 #8 别名 · 执行区 pipeline 状态
+executing-daily-status: executing-t0-job-status
 
 copilot-executing-workspace-deploy: copilot-deploy-fast
 	@echo "▶ [copilot-executing-workspace-deploy] Pod 内 migrate + 导入持仓（失败时见 rollout 内存 limit≥1536Mi）"

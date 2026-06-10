@@ -48,7 +48,7 @@ _PG_PERSIST="$(yq eval '.stack.copilot.persistence.enabled // false' "$CFG")"
 _VALUES_FILE="$(mktemp)"
 trap 'rm -f "$_VALUES_FILE"' EXIT INT TERM
 CHART_VALUES="$INFRA_ROOT/charts/diting-stack/values.yaml"
-yq eval '{"storage": .stack.storage, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$_VALUES_FILE"
+yq eval '{"storage": .stack.storage, "opensearch": .stack.opensearch, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$_VALUES_FILE"
 # radarT0Jobs：prod 可覆盖 enabled/bootstrapHook；cron 表默认来自 chart values.yaml
 yq eval -i '
   .copilot.radarT0Jobs = (
