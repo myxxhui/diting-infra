@@ -108,3 +108,30 @@ resolve_data_disk_id() {
 
   return 1
 }
+
+# ── CLI（合并原 read-disk-id-safe / resolve-disk-id-for-deploy / tf-output-safe）──
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  _TF_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../deploy-engine/deploy/terraform/alicloud" && pwd)"
+  case "${1:-}" in
+    read-disk-id)
+      read_disk_id_safe "${2:?用法: terraform-output-safe.sh read-disk-id <disk_id_file>}"
+      ;;
+    resolve-disk-id)
+      resolve_data_disk_id "${2:?用法: terraform-output-safe.sh resolve-disk-id <tf_dir> [disk_file]}" "${3:-}"
+      ;;
+    output)
+      tf_output_raw_safe "${3:-$_TF_DEFAULT}" "${2:?用法: terraform-output-safe.sh output <name> [tf_dir]}"
+      ;;
+    -h|--help)
+      echo "用法:"
+      echo "  source scripts/terraform-output-safe.sh   # 函数库"
+      echo "  terraform-output-safe.sh read-disk-id <file>"
+      echo "  terraform-output-safe.sh resolve-disk-id <tf_dir> [disk_file]"
+      echo "  terraform-output-safe.sh output <name> [tf_dir]"
+      ;;
+    *)
+      echo "未知子命令: ${1:-}" >&2
+      exit 2
+      ;;
+  esac
+fi

@@ -49,17 +49,27 @@ AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/de
 
 ---
 
-## Copilot 快速部署三档（AI/日常标准 · 与协议 §十一 同步）
+## Copilot 统一部署（AI/日常标准 · 与协议 §十一 同步）
+
+**唯一日常入口**：`make copilot-deploy`（smart 三档：ACR 有→仅 Helm；本地有→push+Helm；否则 build+push+Helm）
+
+| 场景 | 命令 | 说明 |
+|------|------|------|
+| **改代码后上线（默认）** | `make copilot-deploy` | 自动解析 tag（git sha / 脏工作区 sha-d*hash*）→ 构建推送（如需）→ Helm 升级 → rollout |
+| 镜像已在 ACR、只改 values/env | `make copilot-deploy-rollout` | ~30s，仅 Helm + rollout |
+| 本地已 docker build | `COPILOT_SKIP_BUILD=0 make copilot-deploy` 或 push 档 | 跳过重复 build |
+| 强制重建镜像 | `COPILOT_FORCE_BUILD=1 make copilot-deploy` | 全量 build |
+
+**配置真相源**：`config/diting-prod.yaml` → `copilot.image.tag`（Helm values 覆盖）。`make copilot-deploy` 成功后会**自动回写**该 tag，无需手改；手改 tag 仅用于「指定已 push 的镜像做 rollout」时设 `COPILOT_IMAGE_TAG=xxx make copilot-deploy-rollout`。
+
+**禁止为每次功能改动新增 Make 目标**（如 `copilot-xxx-deploy`）。UI/后端/Helm env 变更均：**改 diting-src 代码 → 一条 `make copilot-deploy`**；若仅改 Helm 非镜像项（副本数、env、Cron），改 `config/diting-prod.yaml` 或 Chart values 后 **`make copilot-deploy-rollout`**。
+
+**例外（保留的旧 target）**：带一次性 bootstrap/验收/数据迁移的 target（如 `executing-bars250-deploy`、`copilot-executing-workspace-deploy`）仅用于**首次环境初始化**，不是日常发版路径。
 
 - **工作目录**：本仓 `diting-infra` · `KUBECONFIG=~/.kube/config-diting-prod`
-- **默认**：`make copilot-deploy`（= smart：ACR 有→rollout；本地有→push；否则 full build）
-- **仅 Helm/env**：`make copilot-deploy-rollout`（~30s，镜像已在 ACR）
-- **本地已 build**：`make copilot-deploy-push` 或 `make copilot-push-local && make copilot-helm-upgrade`
-- **强制重建**：`make copilot-deploy-full` 或 `COPILOT_FORCE_BUILD=1 make copilot-deploy`
-- **executing 补采**：`make executing-t0-bootstrap-sync`（默认异步）；阻塞等 Job 用 `make executing-t0-bootstrap-sync-wait`
-- **禁止**：把 executing bootstrap 默认绑进 deploy（曾导致 90min 级阻塞）；deploy 后需补采时单独 make
-- **凭证**：Helm 注入先读 `diting-infra/.env` 再读 `diting-src/.env`（TUSHARE 等可只写 infra）
-- **AI**：改代码后须同会话执行 `make copilot-deploy`，禁止「请本地 deploy」收尾
+- **executing 补采**：`make executing-t0-bootstrap-sync`（与 deploy 解耦，默认不阻塞 deploy）
+- **凭证**：Helm 注入先读 `diting-infra/.env` 再读 `diting-src/.env`
+- **AI**：改 copilot 代码后须同会话执行 `make copilot-deploy`，禁止「请本地 deploy」收尾
 
 完整条文见 `diting-doc/00_系统规则_通用项目协议.md` §十一「Copilot 快速部署三档」。
 

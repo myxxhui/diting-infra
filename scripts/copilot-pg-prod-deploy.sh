@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_ROOT="$(cd "$INFRA_ROOT/../diting-src" && pwd)"
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
-export COPILOT_IMAGE_TAG="${COPILOT_IMAGE_TAG:-$(bash "$SCRIPT_DIR/copilot-resolve-image-tag.sh")}"
+export COPILOT_IMAGE_TAG="${COPILOT_IMAGE_TAG:-$(bash "$SCRIPT_DIR/copilot-image-tag.sh" resolve)}"
 
 echo "▶ [copilot-pg] 1/4 确保 PostgreSQL 库 diting_copilot"
 bash "$SCRIPT_DIR/copilot-ensure-pg-db.sh"

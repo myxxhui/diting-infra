@@ -103,7 +103,7 @@ except Exception as e:
 
 ```bash
 cd diting-infra
-bash scripts/fix-sg-3proxy-systemd.sh
+make fix-sg-proxy-3proxy
 ```
 
 **新建实例**：须在 deploy-engine 仓更新 `deploy/bootstrap/scripts/user-data-proxy.sh`（`Type=simple`、去掉 `daemon`、`timeouts` 放宽至 `600/3600`），push 后 `make update-deploy-engine`。

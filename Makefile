@@ -164,8 +164,8 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 			fi; \
 		fi; \
 	}
-	@if scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
-		export TF_VAR_use_existing_data_disk_id=$$(scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)"); \
+	@if scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
+		export TF_VAR_use_existing_data_disk_id=$$(scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)"); \
 		echo "[prod-up] 复用本地 prod.disk_id: $$TF_VAR_use_existing_data_disk_id"; \
 		(cd $(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud && terraform state rm 'alicloud_disk.prod_data[0]' -state=terraform.tfstate 2>/dev/null) || true; \
 	else \
@@ -175,7 +175,7 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 		_TF="$(CURDIR)/$(DEPLOY_ENGINE_DIR)/deploy/terraform/alicloud"; \
 		if [ -f "$$_TF/terraform.tfstate" ] && [ ! -s "$$_TF/terraform.tfstate" ]; then rm -f "$$_TF/terraform.tfstate"; fi; \
 		(cd "$$_TF" && terraform init -backend-config="prefix=$(PROD_DATA_ENV_PROJECT)/$(PROD_DATA_ENV_ENV)" -reconfigure -input=false -no-color > /dev/null) || true; \
-		_DISK_ID=$$(scripts/resolve-disk-id-for-deploy.sh "$$_TF" "$(DISK_ID_FILE)" 2>/dev/null || true); \
+		_DISK_ID=$$(scripts/terraform-output-safe.sh resolve-disk-id "$$_TF" "$(DISK_ID_FILE)" 2>/dev/null || true); \
 		if [ -n "$$_DISK_ID" ] && echo "$$_DISK_ID" | grep -qE '^d-[a-z0-9]+$$'; then \
 			printf '%s' "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
 			export TF_VAR_use_existing_data_disk_id="$$_DISK_ID"; \
@@ -189,13 +189,15 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 					-var=project=$(PROD_DATA_ENV_PROJECT) \
 					-var=region="$$_REGION" \
 					-var=config_file="$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml"); \
-			_DISK_ID=$$(scripts/tf-output-safe.sh data_disk_id "$$_TF"); \
+			_DISK_ID=$$(scripts/terraform-output-safe.sh output data_disk_id "$$_TF"); \
 			if [ -n "$$_DISK_ID" ] && echo "$$_DISK_ID" | grep -qE '^d-[a-z0-9]+$$'; then \
 				printf '%s' "$$_DISK_ID" > "$(DISK_ID_FILE)"; \
 				echo "[prod-up] 数据盘已创建: $$_DISK_ID"; \
 			fi; \
 		fi; \
 	fi
+	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/terraform-output-safe.sh
+	@bash scripts/ensure-prod-data-snapshot-policy.sh
 	@echo ""
 	@echo "=========================================="
 	@echo "  [1/2] 新加坡 Anthropic 代理（env=sg-proxy · STACK=proxy）"
@@ -403,8 +405,8 @@ up-stack: update-deploy-engine
 	  *) echo "未知 chart: $$_chart · 支持: diting-stack/diting-training/diting-vllm"; exit 1 ;; \
 	esac; \
 	echo "[up-stack] chart=$$_chart → stack=$$_stack"; \
-	if scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
-		export TF_VAR_use_existing_data_disk_id=$$(scripts/read-disk-id-safe.sh "$(DISK_ID_FILE)"); \
+	if scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)" >/dev/null 2>&1; then \
+		export TF_VAR_use_existing_data_disk_id=$$(scripts/terraform-output-safe.sh read-disk-id "$(DISK_ID_FILE)"); \
 		echo "[up-stack] 复用数据盘 TF_VAR_use_existing_data_disk_id=$$TF_VAR_use_existing_data_disk_id"; \
 	fi; \
 	if ! CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) up-stack $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) STACK=$$_stack; then \
@@ -503,21 +505,24 @@ platform-step03-test-persist: platform-step03-prep
 platform-step03-all: platform-step03-up platform-step03-smoke platform-step03-test-persist
 	@echo "✅ [platform-step03-all] up + smoke + persist 完成"
 
-# Copilot 部署加速：三档 smart/rollout/push/full · 内容 tag · ACR/本地缓存跳过 rebuild
-.PHONY: copilot-build-push copilot-build-push-if-needed copilot-push-local copilot-helm-upgrade copilot-rollout-wait
+# ── Copilot 统一部署（日常唯一入口: make copilot-deploy）────────────────────
+# 改 diting-src → make copilot-deploy（自动 tag / build / push / helm / rollout）
+# 仅改 config/diting-prod.yaml 非镜像项 → make copilot-deploy-rollout
+# 禁止为每次功能新增 *-deploy target；见 .cursorrules「Copilot 统一部署」
+.PHONY: copilot-build-push copilot-build-push-if-needed copilot-push-local copilot-helm-upgrade
 .PHONY: copilot-deploy copilot-deploy-rollout copilot-deploy-push copilot-deploy-full copilot-deploy-fast
 .PHONY: copilot-smoke-url copilot-sync-smtp copilot-pg-deploy copilot-sync-tag-from-cluster
 copilot-sync-smtp:
 	@bash scripts/copilot-sync-smtp-from-src-env.sh
 
 copilot-sync-tag-from-cluster:
-	@chmod +x scripts/copilot-sync-image-tag-from-cluster.sh scripts/copilot-sync-image-tag-to-config.sh
-	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-sync-image-tag-from-cluster.sh
+	@chmod +x scripts/copilot-image-tag.sh
+	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-image-tag.sh from-cluster
 
 copilot-build-push:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	chmod +x "$$root/scripts/copilot-resolve-image-tag.sh"; \
-	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-resolve-image-tag.sh")}"; \
+	chmod +x "$$root/scripts/copilot-image-tag.sh"; \
+	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-image-tag.sh" resolve)}"; \
 	echo "▶ [copilot-build-push] tag=$$_tag"; \
 	$(MAKE) -C "$$root/../diting-src" push-copilot-image \
 		DITING_ACR_PASSWORD="$${DITING_ACR_PASSWORD:-$$ACR_PASSWORD}" COPILOT_IMAGE_TAG="$$_tag"
@@ -525,8 +530,8 @@ copilot-build-push:
 # 内容寻址 tag：ACR 已有同 tag 才跳过；脏工作区自动 -d<hash>，避免旧镜像被同名覆盖
 copilot-build-push-if-needed:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	chmod +x "$$root/scripts/copilot-resolve-image-tag.sh" "$$root/scripts/copilot-push-local-if-needed.sh"; \
-	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-resolve-image-tag.sh")}"; \
+	chmod +x "$$root/scripts/copilot-image-tag.sh" "$$root/scripts/copilot-push-local-if-needed.sh"; \
+	_tag="$${COPILOT_IMAGE_TAG:-$$(bash "$$root/scripts/copilot-image-tag.sh" resolve)}"; \
 	export COPILOT_IMAGE_TAG="$$_tag"; \
 	if [ "$${COPILOT_FORCE_BUILD:-0}" = "1" ]; then \
 	  echo "▶ [copilot] COPILOT_FORCE_BUILD=1 · 强制构建推送 $$_tag"; \
@@ -543,33 +548,25 @@ copilot-build-push-if-needed:
 	fi
 
 copilot-push-local:
-	@chmod +x scripts/copilot-push-local-if-needed.sh scripts/copilot-resolve-image-tag.sh
+	@chmod +x scripts/copilot-push-local-if-needed.sh scripts/copilot-image-tag.sh
 	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-push-local-if-needed.sh
 
-# 仅 Helm + rollout（镜像已在 ACR；~30s）
 copilot-helm-upgrade:
-	@chmod +x scripts/copilot-helm-upgrade.sh scripts/copilot-sync-ai-from-src-env.sh \
-	  scripts/copilot-resolve-image-tag.sh scripts/copilot-sync-image-tag-to-config.sh
+	@chmod +x scripts/copilot-helm-upgrade.sh scripts/copilot-sync-ai-from-src-env.sh scripts/copilot-image-tag.sh
 	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" \
 	  bash scripts/copilot-helm-upgrade.sh
 
-copilot-rollout-wait:
-	@chmod +x scripts/copilot-rollout-wait.sh
-	@KUBECONFIG="$${KUBECONFIG:-$$HOME/.kube/config-diting-prod}" bash scripts/copilot-rollout-wait.sh
+copilot-deploy-rollout: copilot-helm-upgrade
+	@echo "✅ [copilot-deploy-rollout] 档位 A 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-image-tag.sh resolve)}"
 
-# ── 标准三档部署（AI/日常默认 copilot-deploy = smart）────────────────────────
-copilot-deploy-rollout: copilot-helm-upgrade copilot-rollout-wait
-	@echo "✅ [copilot-deploy-rollout] 档位 A 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"
-
-copilot-deploy-push: copilot-build-push-if-needed copilot-helm-upgrade copilot-rollout-wait
-	@echo "✅ [copilot-deploy-push] 档位 B 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"
+copilot-deploy-push: copilot-build-push-if-needed copilot-helm-upgrade
+	@echo "✅ [copilot-deploy-push] 档位 B 完成 · tag=$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-image-tag.sh resolve)}"
 
 copilot-deploy-full:
-	@chmod +x scripts/copilot-resolve-image-tag.sh
-	@_tag="$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-resolve-image-tag.sh)}"; \
+	@chmod +x scripts/copilot-image-tag.sh
+	@_tag="$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-image-tag.sh resolve)}"; \
 	$(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
 	$(MAKE) copilot-helm-upgrade; \
-	$(MAKE) copilot-rollout-wait; \
 	echo "✅ [copilot-deploy-full] 档位 C 完成 · tag=$$_tag"
 
 copilot-deploy:
@@ -664,6 +661,23 @@ down-sg-anthropic-proxy:
 	@chmod +x scripts/down-sg-anthropic-proxy.sh
 	@bash scripts/down-sg-anthropic-proxy.sh
 
+# 修复新加坡 proxy 上 3proxy systemd 重启循环
+.PHONY: fix-sg-proxy-3proxy
+fix-sg-proxy-3proxy:
+	@chmod +x scripts/sg-anthropic-proxy-helpers.sh
+	@bash -c 'source scripts/sg-anthropic-proxy-helpers.sh; sg_proxy_fix_3proxy_systemd "$(CURDIR)"'
+
+# 审计香港 prod 独立数据盘（canonical=prod.disk_id）；--apply 删除孤儿盘
+.PHONY: audit-prod-disks
+audit-prod-disks:
+	@chmod +x scripts/audit-prod-disks.sh scripts/terraform-output-safe.sh
+	@bash scripts/audit-prod-disks.sh $(AUDIT_DISK_ARGS)
+
+.PHONY: ensure-prod-data-snapshot
+ensure-prod-data-snapshot:
+	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/terraform-output-safe.sh
+	@bash scripts/ensure-prod-data-snapshot-policy.sh
+
 sync-anthropic-proxy-to-copilot:
 	@chmod +x scripts/sync-anthropic-proxy-to-copilot.sh
 	@bash scripts/sync-anthropic-proxy-to-copilot.sh
@@ -709,12 +723,6 @@ copilot-wave4-deploy:
 copilot-wave4-verify:
 	@chmod +x scripts/copilot-wave4-verify.sh
 	@KUBECONFIG="$(KUBECONFIG)" CONN_FILE="$(CONN_FILE)" bash scripts/copilot-wave4-verify.sh
-
-.PHONY: copilot-radar-audit-hotfix-deploy
-copilot-radar-audit-hotfix-deploy:
-	@echo "⚠️  已弃用：请用 make copilot-wave4-deploy（镜像+Helm 正式部署）"
-	@chmod +x scripts/copilot-radar-audit-hotfix-deploy.sh
-	@KUBECONFIG="$(KUBECONFIG)" bash scripts/copilot-radar-audit-hotfix-deploy.sh
 
 .PHONY: radar-t0-sync radar-t0-collect-prod
 radar-t0-sync:

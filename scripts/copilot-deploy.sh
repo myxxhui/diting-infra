@@ -15,7 +15,7 @@ MODE="${1:-smart}"
 SRC_ROOT="${SRC_ROOT:-$INFRA_ROOT/../diting-src}"
 chmod +x "$SCRIPT_DIR"/copilot-*.sh "$SCRIPT_DIR"/executing-t0-bootstrap-sync.sh 2>/dev/null || true
 
-export COPILOT_IMAGE_TAG="${COPILOT_IMAGE_TAG:-$(bash "$SCRIPT_DIR/copilot-resolve-image-tag.sh" "$SRC_ROOT")}"
+export COPILOT_IMAGE_TAG="${COPILOT_IMAGE_TAG:-$(bash "$SCRIPT_DIR/copilot-image-tag.sh" resolve "$SRC_ROOT")}"
 echo "▶ [copilot-deploy] mode=${MODE} tag=${COPILOT_IMAGE_TAG}"
 
 _t0_bootstrap() {
@@ -27,45 +27,33 @@ _t0_bootstrap() {
   fi
 }
 
-_rollout_wait() {
-  if [ "${COPILOT_WAIT_ROLLOUT:-1}" = "1" ]; then
-    bash "$SCRIPT_DIR/copilot-rollout-wait.sh"
-  fi
-}
-
 case "$MODE" in
   rollout|helm|fast)
     echo "▶ [copilot-deploy] 档位 A · rollout only（~30s）"
     bash "$SCRIPT_DIR/copilot-helm-upgrade.sh"
-    _rollout_wait
     ;;
   push|push-only)
     echo "▶ [copilot-deploy] 档位 B · push local + helm（~1–5min）"
     bash "$SCRIPT_DIR/copilot-push-local-if-needed.sh" "$COPILOT_IMAGE_TAG" \
       || make -C "$INFRA_ROOT" copilot-build-push COPILOT_IMAGE_TAG="$COPILOT_IMAGE_TAG"
     bash "$SCRIPT_DIR/copilot-helm-upgrade.sh"
-    _rollout_wait
     ;;
   full|build)
     echo "▶ [copilot-deploy] 档位 C · full build + push + helm（~5–10min）"
     make -C "$INFRA_ROOT" copilot-build-push COPILOT_IMAGE_TAG="$COPILOT_IMAGE_TAG"
     bash "$SCRIPT_DIR/copilot-helm-upgrade.sh"
-    _rollout_wait
     ;;
   smart|"")
     if bash "$SCRIPT_DIR/copilot-acr-image-exists.sh" "$COPILOT_IMAGE_TAG"; then
       echo "▶ [copilot-deploy] smart→rollout（ACR 已有 ${COPILOT_IMAGE_TAG}）"
       bash "$SCRIPT_DIR/copilot-helm-upgrade.sh"
-      _rollout_wait
     elif bash "$SCRIPT_DIR/copilot-push-local-if-needed.sh" "$COPILOT_IMAGE_TAG"; then
       echo "▶ [copilot-deploy] smart→push 完成"
       bash "$SCRIPT_DIR/copilot-helm-upgrade.sh"
-      _rollout_wait
     else
       echo "▶ [copilot-deploy] smart→full build"
       make -C "$INFRA_ROOT" copilot-build-push COPILOT_IMAGE_TAG="$COPILOT_IMAGE_TAG"
       bash "$SCRIPT_DIR/copilot-helm-upgrade.sh"
-      _rollout_wait
     fi
     ;;
   *)

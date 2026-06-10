@@ -33,6 +33,12 @@ enable_prod_data_disk = true
 data_disk_size        = 100
 data_disk_category    = "cloud_essd"
 
+# 权威数据盘自动快照：每日 16:00 (UTC+8，15:30 后首个整点) · 保留 7 天
+enable_prod_data_disk_snapshot     = true
+prod_data_snapshot_time_points     = ["16"]
+prod_data_snapshot_retention_days  = 7
+prod_data_snapshot_repeat_weekdays = ["1", "2", "3", "4", "5", "6", "7"]
+
 oss_bucket_name = "deploy-engine-k3s-storage"
 oss_bucket_acl  = "public-read-write"
 init_script_acl = "public-read"

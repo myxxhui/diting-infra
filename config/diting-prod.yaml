@@ -46,6 +46,14 @@ stack:
   # 仅静态 PV/PVC + 初始化 Job（与 diting-stack Chart values 同构）
   storage:
     dataPath: /mnt/titan-data/postgres
+    # 权威 ESSD 独立数据盘自动快照（盘 ID 见 prod.disk_id · make ensure-prod-data-snapshot）
+    prod_data_disk_snapshot:
+      enabled: true
+      policy_name: diting-prod-data-daily
+      # 阿里云仅支持整点；「15:30 之后」取 16:00 (UTC+8)
+      time_point_hour: 16
+      retention_days: 7
+      repeat_weekdays: [1, 2, 3, 4, 5, 6, 7]
     timescaledb:
       enabled: true
       pv:
@@ -156,9 +164,9 @@ stack:
     enabled: true
     image:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
-      # 与线上一致 · make copilot-deploy-fast 会按 copilot-resolve-image-tag.sh 回写
+      # 与线上一致 · make copilot-deploy 会由 copilot-image-tag.sh 自动回写 tag
       # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
-      tag: "b8eeb988-d3f3023c"
+      tag: "280152bb-db29d489"
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
@@ -179,8 +187,8 @@ stack:
     ai:
       radarT2Enabled: "true"
       executingT2Enabled: "true"
-      executingT2MaxOutputTokens: "16384"
-      executingT2MaxInputChars: "180000"
+      executingT2MaxOutputTokens: "32000"
+      executingT2MaxInputChars: "400000"
       lighthouseModel: "claude-opus-4-8"
       anthropicModel: "claude-opus-4-8"
       anthropicBaseUrl: "https://api.anthropic.com"

@@ -7,7 +7,7 @@ INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_ROOT="${SRC_ROOT:-$INFRA_ROOT/../diting-src}"
 [ -f "$INFRA_ROOT/.env" ] && set -a && source "$INFRA_ROOT/.env" && set +a
 
-TAG="${1:-${COPILOT_IMAGE_TAG:-$(bash "$SCRIPT_DIR/copilot-resolve-image-tag.sh" "$SRC_ROOT")}}"
+TAG="${1:-${COPILOT_IMAGE_TAG:-$(bash "$SCRIPT_DIR/copilot-image-tag.sh" resolve "$SRC_ROOT")}}"
 LOCAL_REF="diting-copilot:${TAG}"
 
 if bash "$SCRIPT_DIR/copilot-acr-image-exists.sh" "$TAG"; then

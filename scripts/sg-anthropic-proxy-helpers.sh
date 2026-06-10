@@ -247,12 +247,133 @@ sg_proxy_resolve_endpoint() {
   [ -n "$PROXY_IP" ]
 }
 
+# 列出云上全部 proxy ECS（TSV：instance_id|name|eip|eip_alloc|creation_time）
+sg_proxy_list_cloud_instances() {
+  local region="${1:-ap-southeast-1}"
+  local proxy_env="${2:-sg-proxy}"
+  local suffix="-proxy-${proxy_env}"
+  ALICLOUD_REGION="$region" python3 - <<'PY' "$suffix"
+import json, os, subprocess, sys
+suffix = sys.argv[1]
+region = os.environ.get("ALICLOUD_REGION", "ap-southeast-1")
+p = subprocess.run(
+    ["aliyun", "ecs", "DescribeInstances", "--PageSize", "100", "--region", region],
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+)
+if p.returncode != 0:
+    sys.exit(0)
+for inst in json.loads(p.stdout or "{}").get("Instances", {}).get("Instance") or []:
+    name = inst.get("InstanceName") or ""
+    if suffix not in name:
+        continue
+    iid = inst.get("InstanceId") or ""
+    eip = (inst.get("EipAddress") or {}).get("IpAddress") or ""
+    alloc = (inst.get("EipAddress") or {}).get("AllocationId") or ""
+    created = inst.get("CreationTime") or ""
+    print(f"{iid}\t{name}\t{eip}\t{alloc}\t{created}")
+PY
+}
+
+# 将云上已存在的 proxy ECS 导入 Terraform state（避免「健康复用但 state 空 → 下次又 deploy-proxy 叠 ECS」）
+sg_proxy_import_cloud_instance() {
+  local infra_root="$1" project="$2" env="$3"
+  local instance_id="$4" eip_alloc="${5:-}"
+
+  [ -n "$instance_id" ] || return 1
+  local tf_dir="$infra_root/deploy-engine/deploy/terraform/alicloud"
+  local tfvars="$infra_root/config/terraform-${project}-${env}.tfvars"
+  local cfg="$infra_root/config/${project}-${env}.yaml"
+
+  sg_proxy_tf_init "$infra_root" "$project" "$env"
+  (
+    cd "$tf_dir"
+    local tf_args=(-var-file="$tfvars" -var="env_id=$env" -var="project=$project" -var="config_file=$cfg")
+    if ! terraform state list 2>/dev/null | grep -q 'module\.ecs\.alicloud_instance\.stack\["proxy"\]'; then
+      echo "▶ [sg-proxy-import] 导入 instance → state: $instance_id"
+      terraform import "${tf_args[@]}" 'module.ecs.alicloud_instance.stack["proxy"]' "$instance_id"
+    fi
+    if [ -n "$eip_alloc" ] && ! terraform state list 2>/dev/null | grep -q 'module\.ecs\.alicloud_eip_address\.stack\["proxy"\]'; then
+      echo "▶ [sg-proxy-import] 导入 EIP → state: $eip_alloc"
+      terraform import "${tf_args[@]}" 'module.ecs.alicloud_eip_address.stack["proxy"]' "$eip_alloc"
+    fi
+    if [ -n "$eip_alloc" ] && [ -n "$instance_id" ] && ! terraform state list 2>/dev/null | grep -q 'module\.ecs\.alicloud_eip_association\.stack\["proxy"\]'; then
+      echo "▶ [sg-proxy-import] 导入 EIP 绑定 → state: ${eip_alloc}:${instance_id}"
+      terraform import "${tf_args[@]}" 'module.ecs.alicloud_eip_association.stack["proxy"]' "${eip_alloc}:${instance_id}"
+    fi
+  )
+}
+
+# 部署前对账：至多保留 1 台健康 proxy；删其余孤儿；健康则 import state 并复用。
+# 返回 0 = 已复用（调用方写 conn 并 exit）；返回 1 = 需继续 deploy-proxy/up-proxy。
+sg_proxy_reconcile_before_deploy() {
+  local infra_root="$1" project="$2" env="$3" conn_file="$4"
+  local port="$5" user="$6" password="$7"
+  local region="${8:-ap-southeast-1}"
+
+  if ! command -v aliyun >/dev/null 2>&1; then
+    echo "⚠️  [sg-proxy-reconcile] 未安装 aliyun CLI，跳过云上对账"
+    return 1
+  fi
+
+  local conn_ip=""
+  if [ -f "$conn_file" ]; then
+    conn_ip="$(grep -E '^(SG_PROXY_PUBLIC_IP|ANTHROPIC_PROXY_HOST)=' "$conn_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' ' || true)"
+  fi
+
+  local -a rows=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && rows+=("$line")
+  done < <(sg_proxy_list_cloud_instances "$region" "$env")
+
+  if [ "${#rows[@]}" -eq 0 ]; then
+    echo "ℹ️  [sg-proxy-reconcile] 云上无 proxy ECS，将进入创建流程"
+    return 1
+  fi
+
+  echo "▶ [sg-proxy-reconcile] 云上 proxy ECS 共 ${#rows[@]} 台，探测健康并去重（目标：至多 1 台）"
+
+  local keeper_id="" keeper_ip="" keeper_alloc="" keeper_created=""
+  local row iid name eip alloc created
+  for row in "${rows[@]}"; do
+    IFS=$'\t' read -r iid name eip alloc created <<<"$row"
+    [ -n "$eip" ] || continue
+    if sg_proxy_health_check "$eip" "$port" "$user" "$password" 2 3; then
+      if [ -n "$conn_ip" ] && [ "$eip" = "$conn_ip" ]; then
+        keeper_id="$iid"; keeper_ip="$eip"; keeper_alloc="$alloc"
+        break
+      fi
+      if [ -z "$keeper_id" ]; then
+        keeper_id="$iid"; keeper_ip="$eip"; keeper_alloc="$alloc"
+      elif [[ "$created" > "${keeper_created:-}" ]]; then
+        keeper_id="$iid"; keeper_ip="$eip"; keeper_alloc="$alloc"
+      fi
+      keeper_created="$created"
+    fi
+  done
+
+  if [ -z "$keeper_id" ]; then
+    echo "⚠️  [sg-proxy-reconcile] 无健康 proxy，清理全部 ${#rows[@]} 台后再创建"
+    sg_proxy_orphan_cleanup "$region" "$env" "$conn_file" ""
+    return 1
+  fi
+
+  echo "✅ [sg-proxy-reconcile] 保留健康实例 ${keeper_id} ip=${keeper_ip}，删除其余"
+  sg_proxy_orphan_cleanup "$region" "$env" "$conn_file" "$keeper_id"
+  sg_proxy_import_cloud_instance "$infra_root" "$project" "$env" "$keeper_id" "$keeper_alloc" || true
+  PROXY_IP="$keeper_ip"
+  PROXY_INSTANCE_ID="$keeper_id"
+  PROXY_PORT="$port"
+  export PROXY_IP PROXY_INSTANCE_ID PROXY_PORT
+  return 0
+}
+
 # Terraform state 为空或漂移时，按实例名 / sg-proxy.conn IP 用 aliyun CLI 回收孤儿 proxy ECS+EIP
-# 匹配：*-proxy-sg-proxy（历史 project 可能为 deploy-engine 或 diting）
+# 第 4 参 keep_instance_id 非空时保留该 ECS（仅删其余同名实例）
 sg_proxy_orphan_cleanup() {
   local region="${1:-ap-southeast-1}"
   local proxy_env="${2:-sg-proxy}"
   local conn_file="${3:-}"
+  local keep_instance_id="${4:-}"
 
   if ! command -v aliyun >/dev/null 2>&1; then
     echo "⚠️  [sg-proxy-orphan] 未安装 aliyun CLI，跳过 state 外孤儿回收（请控制台手动释放 *-proxy-${proxy_env}）"
@@ -265,12 +386,13 @@ sg_proxy_orphan_cleanup() {
   fi
 
   local suffix="-proxy-${proxy_env}"
-  echo "▶ [sg-proxy-orphan] 扫描 ${region} 孤儿代理（实例名 *${suffix} / conn IP=${conn_ip:-无}）"
+  echo "▶ [sg-proxy-orphan] 扫描 ${region} 孤儿代理（实例名 *${suffix} / conn IP=${conn_ip:-无} / keep=${keep_instance_id:-无}）"
 
-  ALICLOUD_REGION="$region" python3 - <<'PY' "$suffix" "$conn_ip"
+  ALICLOUD_REGION="$region" KEEP="$keep_instance_id" python3 - <<'PY' "$suffix" "$conn_ip"
 import json, os, subprocess, sys
 
 suffix, conn_ip = sys.argv[1], sys.argv[2]
+keep = os.environ.get("KEEP", "")
 region = os.environ.get("ALICLOUD_REGION", "ap-southeast-1")
 
 def run(*args):
@@ -302,6 +424,8 @@ for inst in instances:
     iid = inst.get("InstanceId") or ""
     eip = (inst.get("EipAddress") or {}).get("IpAddress") or ""
     if suffix in name or (conn_ip and eip == conn_ip):
+        if keep and iid == keep:
+            continue
         targets.append((iid, name, eip, (inst.get("EipAddress") or {}).get("AllocationId") or ""))
 
 if not targets:
@@ -336,4 +460,59 @@ if conn_ip:
             except Exception as e:
                 print(f"  ⚠️ 释放孤立 Available EIP 跳过: {e}")
 PY
+}
+
+# SSH 修复已部署 proxy 上 3proxy systemd 重启循环（与 user-data-proxy.sh 对齐）
+sg_proxy_fix_3proxy_systemd() {
+  local infra_root="$1"
+  local cfg="${2:-$infra_root/config/diting-prod.yaml}"
+  local conn_file="${3:-$infra_root/sg-proxy.conn}"
+
+  sg_proxy_load_env "$infra_root"
+  local pw port user
+  pw="$(sg_proxy_resolve_password "$infra_root")"
+  port="$(yq eval '.anthropic_proxy.port // 3128' "$cfg")"
+  user="$(yq eval '.anthropic_proxy.user // "ditingproxy"' "$cfg")"
+  sg_proxy_resolve_endpoint "$infra_root" diting sg-proxy "$conn_file" "$port"
+
+  echo "▶ [sg-proxy-fix-3proxy] ${PROXY_IP}:${PROXY_PORT}"
+  sshpass -p "${TF_VAR_instance_password:-$pw}" ssh -o StrictHostKeyChecking=no "root@${PROXY_IP}" \
+    "PROXY_USER='${user}' PROXY_PASS='${pw}' PROXY_PORT='${PROXY_PORT}' bash -s" <<'REMOTE'
+set -euo pipefail
+cp /etc/3proxy/3proxy.cfg /etc/3proxy/3proxy.cfg.bak.$(date +%s) 2>/dev/null || true
+cat > /etc/3proxy/3proxy.cfg <<EOF
+pidfile /run/3proxy.pid
+maxconn 200
+nserver 8.8.8.8
+nserver 223.5.5.5
+nscache 65536
+timeouts 1 5 30 300 600 3600 15 300
+auth strong
+users ${PROXY_USER}:CL:${PROXY_PASS}
+proxy -p${PROXY_PORT}
+EOF
+cat > /etc/systemd/system/3proxy.service <<'UNIT'
+[Unit]
+Description=3proxy Anthropic egress
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/3proxy /etc/3proxy/3proxy.cfg
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl reset-failed 3proxy || true
+pkill -x 3proxy || true
+sleep 1
+systemctl restart 3proxy
+sleep 2
+systemctl is-active 3proxy
+ss -lntp | grep "${PROXY_PORT}"
+REMOTE
+  echo "✅ [sg-proxy-fix-3proxy] 3proxy systemd 已修复"
 }

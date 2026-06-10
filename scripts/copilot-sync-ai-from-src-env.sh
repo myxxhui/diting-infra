@@ -18,6 +18,29 @@ set -a && source "$SRC_ENV" && set +a
 [ -n "${ANTHROPIC_API_KEY:-}" ] \
   || { echo "错误: $SRC_ENV 缺 ANTHROPIC_API_KEY（模式 C T2 Opus 必需）"; exit 1; }
 
+# 部署前探活：避免无效 key 覆盖集群内仍有效的 Secret（401 会秒失败）
+if command -v python3 >/dev/null 2>&1; then
+  _SRC_ROOT="${SRC_ROOT:-$INFRA_ROOT/../diting-src}"
+  ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+    ANTHROPIC_HTTPS_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}" \
+    ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" \
+    PYTHONPATH="$_SRC_ROOT" python3 - <<'PY' || { echo "错误: ANTHROPIC_API_KEY 探活失败（401/不可达），已中止 helm 以免覆盖生产 Secret"; exit 1; }
+import os, sys
+from apps.common.ai_dispatcher import AIDispatcher
+AIDispatcher._instance = None
+d = AIDispatcher(anthropic_key=os.environ["ANTHROPIC_API_KEY"])
+try:
+    r = d.call("critic", [{"role": "user", "content": "只回复 OK"}], max_tokens=8, force_route="remote")
+except Exception as exc:
+    print(f"[copilot-sync-ai] Anthropic 探活失败: {exc}", file=sys.stderr)
+    sys.exit(1)
+if r.model == "mock" or (r.raw or {}).get("_dispatcher_mock"):
+    print("[copilot-sync-ai] Anthropic 探活返回 mock，key 无效", file=sys.stderr)
+    sys.exit(1)
+print("[copilot-sync-ai] Anthropic key 探活 OK")
+PY
+fi
+
 _COPILOT_TAG="${COPILOT_IMAGE_TAG:-$(yq eval '.stack.copilot.image.tag // "latest"' "$CFG")}"
 _PG_ENABLED="$(yq eval '.stack.copilot.postgres.enabled // false' "$CFG")"
 _PG_PERSIST="$(yq eval '.stack.copilot.persistence.enabled // false' "$CFG")"
@@ -60,8 +83,8 @@ yq eval -i "
   .copilot.ai.deepseekModel = \"${DEEPSEEK_MODEL:-deepseek-chat}\" |
   .copilot.ai.radarT1Mode = \"${RADAR_T1_MODE:-auto}\" |
   .copilot.ai.tushareToken = \"${TUSHARE_TOKEN:-}\" |
-  .copilot.ai.executingT2MaxOutputTokens = \"${EXECUTING_T2_MAX_OUTPUT_TOKENS:-16384}\" |
-  .copilot.ai.executingT2MaxInputChars = \"${EXECUTING_T2_MAX_INPUT_CHARS:-180000}\" |
+  .copilot.ai.executingT2MaxOutputTokens = \"${EXECUTING_T2_MAX_OUTPUT_TOKENS:-32000}\" |
+  .copilot.ai.executingT2MaxInputChars = \"${EXECUTING_T2_MAX_INPUT_CHARS:-400000}\" |
   .copilot.radarT0CacheMaxAgeHours = \"${RADAR_T0_CACHE_MAX_AGE_HOURS:-24}\" |
   .copilot.radarT0RetentionDays = \"${RADAR_T0_RETENTION_DAYS:-1}\" |
   .copilot.radarFileRetentionHours = \"${RADAR_FILE_RETENTION_HOURS:-24}\" |
