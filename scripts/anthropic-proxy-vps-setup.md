@@ -99,13 +99,12 @@ except Exception as e:
 
 **根因**：`user-data-proxy.sh` 旧版 `Type=forking` + `daemon` 导致 systemd 每 ~90s 判定启动失败并重启，长连接被掐断。
 
-**已部署实例热修复**：
+**修复方式（主目录实现，禁止改 deploy-engine 子模块）**：
 
-```bash
-cd diting-infra
-make fix-sg-proxy-3proxy
-```
+- `make deploy-sg-anthropic-proxy` 成功路径会自动 SSH 应用 3proxy 运行时配置（`sg_proxy_apply_3proxy_runtime_fix`）
+- 已部署实例可手动：`make fix-sg-3proxy-systemd`
+- 跳过自动修复：`SKIP_3PROXY_RUNTIME_FIX=1 make deploy-sg-anthropic-proxy`
 
-**新建实例**：须在 deploy-engine 仓更新 `deploy/bootstrap/scripts/user-data-proxy.sh`（`Type=simple`、去掉 `daemon`、`timeouts` 放宽至 `600/3600`），push 后 `make update-deploy-engine`。
+deploy-engine 子模块仅通过 `make update-deploy-engine` 同步；3proxy 长连接配置由本仓 `scripts/sg-anthropic-proxy-helpers.sh` 负责。
 
 [Ref: step_14 · L4 实践记录_ModeC深度研报重构]

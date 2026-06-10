@@ -31,6 +31,10 @@ PROXY_PASSWORD="$(sg_proxy_resolve_password "$INFRA_ROOT")" || {
 _write_conn_and_finish() {
   local ip="$1"
   local port="$2"
+  if [ "${SKIP_3PROXY_RUNTIME_FIX:-0}" != "1" ]; then
+    sg_proxy_apply_3proxy_runtime_fix "$ip" "$port" "$PROXY_USER" "$PROXY_PASSWORD" "${TF_VAR_instance_password:-$PROXY_PASSWORD}" \
+      || echo "⚠️  [deploy-sg-anthropic-proxy] 3proxy 运行时配置未生效，可手动 bash scripts/fix-sg-3proxy-systemd.sh"
+  fi
   sg_proxy_write_conn_file "$CONN_FILE" "$ip" "$port" "$PROXY_USER"
   echo "✅ [deploy-sg-anthropic-proxy] 代理可用 公网 IP=${ip} 端口=${port}"
   echo "   连接信息已写入 $CONN_FILE"

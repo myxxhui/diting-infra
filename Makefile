@@ -20,7 +20,7 @@ export
 
 .PHONY: update-deploy-engine init-local-config check-deploy-prereqs deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
 .PHONY: deploy-sg-anthropic-proxy verify-sg-anthropic-proxy down-sg-anthropic-proxy sync-anthropic-proxy-to-copilot \
-	deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled \
+	deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled fix-sg-3proxy-systemd \
 	deploy-anthropic-proxy-if-enabled down-anthropic-proxy-if-enabled
 .PHONY: ensure-kubecm kubecm-add-switch kubecm-remove kubeconfig-sync kubeconfig-restore-state
 
@@ -642,8 +642,13 @@ copilot-modec-verify:
 # 新加坡 Anthropic 出口代理（deploy-engine · terraform-diting-sg-proxy.tfvars）
 deploy-sg-anthropic-proxy:
 	@chmod +x scripts/deploy-sg-anthropic-proxy.sh scripts/down-sg-anthropic-proxy.sh \
-		scripts/sync-anthropic-proxy-to-copilot.sh scripts/sg-anthropic-proxy-helpers.sh
+		scripts/sync-anthropic-proxy-to-copilot.sh scripts/sg-anthropic-proxy-helpers.sh \
+		scripts/fix-sg-3proxy-systemd.sh
 	@bash scripts/deploy-sg-anthropic-proxy.sh
+
+fix-sg-3proxy-systemd:
+	@chmod +x scripts/fix-sg-3proxy-systemd.sh scripts/sg-anthropic-proxy-helpers.sh
+	@bash scripts/fix-sg-3proxy-systemd.sh
 
 # 仅探测新加坡代理是否可用（不创建 ECS/EIP）
 verify-sg-anthropic-proxy:

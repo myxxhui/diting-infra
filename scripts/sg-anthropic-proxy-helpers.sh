@@ -308,6 +308,63 @@ sg_proxy_health_check() {
   return 1
 }
 
+# 在 proxy ECS 上应用 3proxy 运行时配置（Type=simple · 无 daemon · 长连接超时放宽）
+# 实现在 diting-infra 主目录，不修改 deploy-engine 子模块 user-data-proxy.sh
+sg_proxy_apply_3proxy_runtime_fix() {
+  local host="$1"
+  local port="$2"
+  local user="$3"
+  local password="$4"
+  local ssh_password="${5:-$password}"
+
+  [ -n "$host" ] && [ -n "$port" ] && [ -n "$user" ] && [ -n "$password" ] || return 1
+  command -v sshpass >/dev/null 2>&1 || {
+    echo "❌ [sg-proxy] 未安装 sshpass，无法 SSH 修复 3proxy" >&2
+    return 1
+  }
+
+  echo "▶ [sg-proxy] 应用 3proxy 运行时配置 · ${host}:${port}"
+  sshpass -p "$ssh_password" ssh -o StrictHostKeyChecking=no "root@${host}" \
+    "PROXY_USER='${user}' PROXY_PASS='${password}' PROXY_PORT='${port}' bash -s" <<'REMOTE'
+set -euo pipefail
+cp /etc/3proxy/3proxy.cfg /etc/3proxy/3proxy.cfg.bak.$(date +%s) 2>/dev/null || true
+cat > /etc/3proxy/3proxy.cfg <<EOF
+pidfile /run/3proxy.pid
+maxconn 200
+nserver 8.8.8.8
+nserver 223.5.5.5
+nscache 65536
+timeouts 1 5 30 300 600 3600 15 300
+auth strong
+users ${PROXY_USER}:CL:${PROXY_PASS}
+proxy -p${PROXY_PORT}
+EOF
+cat > /etc/systemd/system/3proxy.service <<'UNIT'
+[Unit]
+Description=3proxy Anthropic egress
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/3proxy /etc/3proxy/3proxy.cfg
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl reset-failed 3proxy || true
+pkill -x 3proxy || true
+sleep 1
+systemctl restart 3proxy
+sleep 2
+systemctl is-active 3proxy
+systemctl show 3proxy -p NRestarts,ActiveState
+ss -lntp | grep "${PROXY_PORT}"
+REMOTE
+}
+
 sg_proxy_write_conn_file() {
   local conn_file="$1"
   local ip="$2"
