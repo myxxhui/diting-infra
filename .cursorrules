@@ -60,7 +60,27 @@ AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/de
 | 本地已 docker build | `COPILOT_SKIP_BUILD=0 make copilot-deploy` 或 push 档 | 跳过重复 build |
 | 强制重建镜像 | `COPILOT_FORCE_BUILD=1 make copilot-deploy` | 全量 build |
 
-**配置真相源**：`config/diting-prod.yaml` → `copilot.image.tag`（Helm values 覆盖）。`make copilot-deploy` 成功后会**自动回写**该 tag，无需手改；手改 tag 仅用于「指定已 push 的镜像做 rollout」时设 `COPILOT_IMAGE_TAG=xxx make copilot-deploy-rollout`。
+**配置真相源**：`config/diting-prod.yaml` → `stack.copilot.image.tag`（Helm values 覆盖）。`make copilot-deploy` 会**尝试自动回写** tag；若本机 ACR 校验失败则跳过，**须手动回写**（见下）。
+
+#### 镜像 tag 显式指定与配置回写（必守）
+
+| 场景 | 命令 |
+|------|------|
+| **自定义/新 tag 上线** | `COPILOT_IMAGE_TAG=<tag> make copilot-deploy` |
+| 镜像已在 ACR、仅 rollout | `COPILOT_IMAGE_TAG=<tag> make copilot-deploy-rollout` |
+| 默认 resolve tag | `make copilot-deploy`（仍须部署后回写） |
+
+**部署后（必做）**：
+1. `make copilot-sync-tag-from-cluster`（优先）
+2. ACR 校验跳过时：`yq eval -i '.stack.copilot.image.tag = "<tag>"' config/diting-prod.yaml`
+3. **验收三连**（yaml = Helm = Pod 须一致）：
+   ```bash
+   yq eval '.stack.copilot.image.tag' config/diting-prod.yaml
+   helm get values diting-stack -n platform -o yaml | yq '.copilot.image.tag'
+   kubectl -n platform get deploy diting-copilot -o jsonpath='{.spec.template.spec.containers[?(@.name=="copilot")].image}{"\n"}'
+   ```
+
+**禁止** yaml 与集群 tag 不一致时宣告部署完成。
 
 **禁止为每次功能改动新增 Make 目标**（如 `copilot-xxx-deploy`）。UI/后端/Helm env 变更均：**改 diting-src 代码 → 一条 `make copilot-deploy`**；若仅改 Helm 非镜像项（副本数、env、Cron），改 `config/diting-prod.yaml` 或 Chart values 后 **`make copilot-deploy-rollout`**。
 
@@ -69,9 +89,9 @@ AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/de
 - **工作目录**：本仓 `diting-infra` · `KUBECONFIG=~/.kube/config-diting-prod`
 - **executing 补采**：`make executing-t0-bootstrap-sync`（与 deploy 解耦，默认不阻塞 deploy）
 - **凭证**：Helm 注入先读 `diting-infra/.env` 再读 `diting-src/.env`
-- **AI**：改 copilot 代码后须同会话执行 `make copilot-deploy`，禁止「请本地 deploy」收尾
+- **AI**：改 copilot 代码后须同会话 `make copilot-deploy`；部署后须同会话 tag 回写 + 验收三连，禁止「请本地 deploy」收尾
 
-完整条文见 `diting-doc/00_系统规则_通用项目协议.md` §十一「Copilot 快速部署三档」。
+完整条文见 `diting-doc/00_系统规则_通用项目协议.md` §十一「Copilot 统一部署」→「镜像 tag 显式指定与配置回写」。
 
 ---
 
