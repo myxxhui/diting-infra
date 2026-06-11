@@ -360,6 +360,15 @@ copilot:
       - id: l4-atr-bars-sync
         schedule: "0 16 * * 1-5"
         activeDeadlineSeconds: 900
+      - id: l3-fii-twse-monthly
+        schedule: "0 8 5-12 * *"
+        activeDeadlineSeconds: 1800
+      - id: l3-fii-odm-quarterly
+        schedule: "0 20 * * 1-5"
+        activeDeadlineSeconds: 3600
+      - id: l3-fii-gb200-milestone
+        schedule: "0 17 * * 1-5"
+        activeDeadlineSeconds: 3600
       - id: l4-micro-eod
         schedule: "10 16 * * 1-5"
         activeDeadlineSeconds: 1800

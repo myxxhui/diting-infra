@@ -18,17 +18,29 @@ set -a && source "$SRC_ENV" && set +a
 [ -n "${ANTHROPIC_API_KEY:-}" ] \
   || { echo "错误: $SRC_ENV 缺 ANTHROPIC_API_KEY（模式 C T2 Opus 必需）"; exit 1; }
 
-# 部署前探活：避免无效 key 覆盖集群内仍有效的 Secret（401 会秒失败）
+# 部署前探活：避免无效 key 或失效代理 IP 覆盖集群内仍有效的 Secret
 # 仅改前端/镜像、本地代理不可达时：COPILOT_SKIP_ANTHROPIC_PROBE=1 make copilot-deploy-rollout
 if command -v python3 >/dev/null 2>&1 && [ "${COPILOT_SKIP_ANTHROPIC_PROBE:-0}" != "1" ]; then
   _SRC_ROOT="${SRC_ROOT:-$INFRA_ROOT/../diting-src}"
+  _PYTHON="${COPILOT_SYNC_PYTHON:-$_SRC_ROOT/.venv/bin/python3}"
+  if [ ! -x "$_PYTHON" ]; then
+    _PYTHON="$(command -v python3.11 || command -v python3.10 || command -v python3.9 || command -v python3)"
+  fi
   ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
     ANTHROPIC_HTTPS_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}" \
     ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" \
-    PYTHONPATH="$_SRC_ROOT" python3 - <<'PY' || { echo "错误: ANTHROPIC_API_KEY 探活失败（401/不可达），已中止 helm 以免覆盖生产 Secret"; exit 1; }
+    PYTHONPATH="$_SRC_ROOT" "$_PYTHON" - <<'PY' || { echo "错误: Anthropic 探活失败（key/代理不可达），已中止 helm 以免覆盖生产 Secret"; exit 1; }
 import os, sys
-from apps.common.ai_dispatcher import AIDispatcher
+from apps.common.ai_dispatcher import AIDispatcher, probe_anthropic_proxy_tcp
+
 AIDispatcher._instance = None
+if os.environ.get("ANTHROPIC_HTTPS_PROXY", "").strip():
+    ok, detail = probe_anthropic_proxy_tcp()
+    if not ok:
+        print(f"[copilot-sync-ai] {detail}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[copilot-sync-ai] Anthropic 代理 TCP 探活 OK · {detail}")
+
 d = AIDispatcher(anthropic_key=os.environ["ANTHROPIC_API_KEY"])
 try:
     r = d.call("critic", [{"role": "user", "content": "只回复 OK"}], max_tokens=8, force_route="remote")

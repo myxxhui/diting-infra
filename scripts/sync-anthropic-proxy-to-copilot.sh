@@ -6,6 +6,17 @@ INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_ENV="${SRC_ENV:-$INFRA_ROOT/../diting-src/.env}"
 CONN_FILE="${INFRA_ROOT}/sg-proxy.conn"
 
+# 优先从云上解析当前代理 IP 写入 conn（避免 Secret 长期指向已回收 EIP）
+if [ -f "$SCRIPT_DIR/sg-anthropic-proxy-helpers.sh" ]; then
+  # shellcheck source=sg-anthropic-proxy-helpers.sh
+  source "$SCRIPT_DIR/sg-anthropic-proxy-helpers.sh"
+  if sg_proxy_resolve_endpoint "$INFRA_ROOT" diting sg-proxy "$CONN_FILE" "3128"; then
+    sg_proxy_write_conn_file "$CONN_FILE" "$PROXY_IP" "${PROXY_PORT:-3128}" \
+      "${ANTHROPIC_PROXY_USER:-ditingproxy}"
+    echo "ℹ️  [sync-anthropic-proxy] 已刷新 sg-proxy.conn · ip=${PROXY_IP} port=${PROXY_PORT:-3128}"
+  fi
+fi
+
 [ -f "$CONN_FILE" ] || {
   echo "错误: 缺少 $CONN_FILE，请先 make deploy-sg-anthropic-proxy"
   exit 1

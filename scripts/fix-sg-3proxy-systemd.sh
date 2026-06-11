@@ -12,7 +12,7 @@ PW="$(sg_proxy_resolve_password "$INFRA_ROOT")"
 CONN="$INFRA_ROOT/sg-proxy.conn"
 PORT="$(yq eval '.anthropic_proxy.port // 3128' "$INFRA_ROOT/config/diting-prod.yaml")"
 USER="$(yq eval '.anthropic_proxy.user // "ditingproxy"' "$INFRA_ROOT/config/diting-prod.yaml")"
-sg_proxy_resolve_endpoint "$INFRA_ROOT" diting prod "$CONN" "$PORT"
+sg_proxy_resolve_endpoint "$INFRA_ROOT" diting sg-proxy "$CONN" "$PORT"
 
 sg_proxy_apply_3proxy_runtime_fix "$PROXY_IP" "$PROXY_PORT" "$USER" "$PW" "${TF_VAR_instance_password:-$PW}"
 echo "✅ sg-proxy 3proxy 已修复"
