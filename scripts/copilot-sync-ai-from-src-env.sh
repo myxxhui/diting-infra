@@ -19,7 +19,8 @@ set -a && source "$SRC_ENV" && set +a
   || { echo "错误: $SRC_ENV 缺 ANTHROPIC_API_KEY（模式 C T2 Opus 必需）"; exit 1; }
 
 # 部署前探活：避免无效 key 覆盖集群内仍有效的 Secret（401 会秒失败）
-if command -v python3 >/dev/null 2>&1; then
+# 仅改前端/镜像、本地代理不可达时：COPILOT_SKIP_ANTHROPIC_PROBE=1 make copilot-deploy-rollout
+if command -v python3 >/dev/null 2>&1 && [ "${COPILOT_SKIP_ANTHROPIC_PROBE:-0}" != "1" ]; then
   _SRC_ROOT="${SRC_ROOT:-$INFRA_ROOT/../diting-src}"
   ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
     ANTHROPIC_HTTPS_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}" \

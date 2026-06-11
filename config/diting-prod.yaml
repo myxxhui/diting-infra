@@ -189,7 +189,7 @@ stack:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
       # 与线上一致 · make copilot-deploy 会由 copilot-image-tag.sh 自动回写 tag
       # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
-      tag: "280152bb-db29d489"
+      tag: "cb61bded-db37e95e"
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
@@ -304,8 +304,11 @@ stack:
           schedule: "0 16 * * 1-5"
           activeDeadlineSeconds: 900
         - id: l3-fii-twse-monthly
-          schedule: "0 8 5 * *"
+          schedule: "0 8 5-12 * *"
           activeDeadlineSeconds: 1800
+        - id: l3-fii-odm-quarterly
+          schedule: "0 20 * * 1-5"
+          activeDeadlineSeconds: 3600
     # 28_ daily-pipeline / migrate 曾 OOM(137) · 与 values 默认对齐 1.5Gi
     resources:
       requests:

@@ -568,8 +568,8 @@ copilot-deploy-push: copilot-build-push-if-needed copilot-helm-upgrade
 copilot-deploy-full:
 	@chmod +x scripts/copilot-image-tag.sh
 	@_tag="$${COPILOT_IMAGE_TAG:-$$(bash scripts/copilot-image-tag.sh resolve)}"; \
-	$(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag"; \
-	$(MAKE) copilot-helm-upgrade; \
+	$(MAKE) copilot-build-push COPILOT_IMAGE_TAG="$$_tag" && \
+	$(MAKE) copilot-helm-upgrade && \
 	echo "✅ [copilot-deploy-full] 档位 C 完成 · tag=$$_tag"
 
 copilot-deploy:
