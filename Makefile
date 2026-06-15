@@ -19,6 +19,9 @@ STAGE2_01_NS ?= default
 export
 
 .PHONY: update-deploy-engine init-local-config check-deploy-prereqs deploy deploy-dev down stage2-01-down stage2-01-full-down diting prod sg-proxy
+.PHONY: spot-prefer-on-deploy cluster-spot-watch spot-billing-status switch-stack-billing \
+	spot-intent-mark spot-guard-sync-secret spot-guard-cron-run-now \
+	redeploy-prod-spot-prefer redeploy-prod-ondemand-fallback
 .PHONY: deploy-sg-anthropic-proxy verify-sg-anthropic-proxy down-sg-anthropic-proxy sync-anthropic-proxy-to-copilot \
 	deploy-sg-anthropic-proxy-if-enabled sync-anthropic-proxy-if-enabled fix-sg-3proxy-systemd \
 	deploy-anthropic-proxy-if-enabled down-anthropic-proxy-if-enabled
@@ -148,6 +151,10 @@ down-data-db-prod: down-diting-prod
 
 # make deploy diting prod 的实际执行 target。若 Terraform state 中 NAS 访问组仍为 dev 共享（diting_nas_group_dev），deploy 时会尝试 replace 并销毁该资源导致 InvalidAccessGroup.AlreadyAttached；Up 前先从 state 移除，让 Terraform 仅创建 prod 自有 NAS
 deploy-diting-prod: update-deploy-engine check-deploy-prereqs
+	@if [ "$${SKIP_SPOT_PREFER:-0}" != "1" ]; then \
+		chmod +x scripts/spot-prefer-on-deploy.sh scripts/lib/spot-billing-lib.sh; \
+		bash scripts/spot-prefer-on-deploy.sh; \
+	fi
 	@echo ""
 	@echo "=========================================="
 	@echo "  双环境 Up：①新加坡代理(sg-proxy) ②香港 prod"
@@ -209,7 +216,10 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 	@echo "=========================================="
 	@echo "  [2/2] 香港 prod K3s 集群（env=prod · STACK=base）"
 	@echo "=========================================="
-	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	@_spot_cfg="$(CURDIR)/config/.spot-active"; \
+	_deploy_cfg="$(CONFIG_ROOT)"; \
+	if [ -f "$$_spot_cfg/terraform-diting-prod.tfvars" ]; then _deploy_cfg="$$_spot_cfg"; fi; \
+	CONFIG_ROOT="$$_deploy_cfg" $(MAKE) -C $(DEPLOY_ENGINE_DIR) deploy $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@echo ""
 	@echo "=========================================="
 	@echo "  注册 kubeconfig 到 kubecm 并切换当前 context"
@@ -248,6 +258,8 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 			else echo "⚠️  core_repo_path/REPO_I_ROOT 未设置，跳过"; fi; \
 		fi; \
 	else echo "数据采集已禁用（data_ingestion.enabled=false），跳过"; fi
+	@chmod +x scripts/spot-intent-mark.sh scripts/lib/spot-billing-lib.sh
+	@bash scripts/spot-intent-mark.sh up
 	@$(MAKE) prod-deploy-summary
 
 # 部署收尾：业务访问地址与验收指引
@@ -266,7 +278,8 @@ prod-write-conn:
 prod-sync-conn-secret:
 	@STACK_NS=$$(yq eval '.stack.namespace // "platform"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml" 2>/dev/null || echo platform); \
 	export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
-	STACK_NS="$$STACK_NS" scripts/prod-sync-conn-secret.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+	STACK_NS="$$STACK_NS" scripts/prod-sync-conn-secret.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV); \
+	STACK_NS="$$STACK_NS" bash scripts/spot-guard-sync-k8s-secret.sh "$(CONFIG_ROOT)"
 
 # 在远程 K3s 提交采集 Job（helm upgrade diting-stack · ingest.enabled；默认不等待 Job 完成，由 K8s 监管）
 # 用法: make deploy-ingest-job [INGEST_TARGET=ingest-test-real|ingest-production]
@@ -373,6 +386,8 @@ down-diting-prod:
 		echo "❌ make down diting prod 未完全成功（proxy=$$_proxy_down hk=$$_hk_down）"; exit 1; \
 	fi
 	@bash scripts/kubecm-helpers.sh remove $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
+	@chmod +x scripts/spot-intent-mark.sh scripts/lib/spot-billing-lib.sh
+	@bash scripts/spot-intent-mark.sh down
 	@echo "make down diting prod OK（新加坡代理 + 香港 prod ECS/EIP 已回收；kubecm 已移除；prod 数据盘与静态 PV 保留）"
 
 # ============================================================================
@@ -473,6 +488,63 @@ down-all:
 
 platform-status:
 	@CONFIG_ROOT="$(CONFIG_ROOT)" $(MAKE) -C $(DEPLOY_ENGINE_DIR) platform-status $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
+
+# ============================================================================
+# Spot Guard · 竞价感知启动 + 日常巡检（Phase 1 · diting-infra）
+# [Ref: diting-doc/03_/_共享规约/31_Spot计费感知与巡检规约.md]
+# ============================================================================
+spot-prefer-on-deploy:
+	@chmod +x scripts/spot-prefer-on-deploy.sh scripts/lib/spot-billing-lib.sh
+	@bash scripts/spot-prefer-on-deploy.sh
+
+spot-billing-status:
+	@chmod +x scripts/lib/spot-billing-lib.sh scripts/spot-intent-mark.sh
+	@bash -c 'source scripts/lib/spot-billing-lib.sh; spot_load_env "$(CURDIR)"; \
+		echo "=== 运行意图 ==="; bash scripts/spot-intent-mark.sh status; echo ""; \
+		echo "=== Spot 计费 / 云快照 ==="; \
+		for s in proxy base; do \
+		  b=$$(spot_read_state_field "$(CURDIR)" $$s billing); \
+		  z=$$(spot_read_state_field "$(CURDIR)" $$s resolved_zone); \
+		  i=$$(spot_read_state_field "$(CURDIR)" $$s instance_id); \
+		  e=$$(spot_read_state_field "$(CURDIR)" $$s eip_address); \
+		  echo "  $$s: billing=$${b:-未知} zone=$${z:-} instance=$${i:-} eip=$${e:-}"; \
+		done; \
+		r="$(CURDIR)/config/.spot-watch-last-report.json"; \
+		if [ -f "$$r" ]; then echo ""; echo "最近巡检:"; cat "$$r"; fi'
+
+spot-intent-mark:
+	@chmod +x scripts/spot-intent-mark.sh scripts/lib/spot-billing-lib.sh
+	@bash scripts/spot-intent-mark.sh "$(OP)"
+
+cluster-spot-watch:
+	@chmod +x scripts/cluster-spot-watch.sh scripts/lib/spot-billing-lib.sh scripts/sg-anthropic-proxy-helpers.sh scripts/spot-watch-send-email.py
+	@CRON="$(CRON)" INTERACTIVE="$(INTERACTIVE)" bash scripts/cluster-spot-watch.sh
+
+# 集群内 Spot Guard：同步 AK/SK Secret（deploy / prod-sync-conn-secret 也会调用）
+spot-guard-sync-secret:
+	@chmod +x scripts/spot-guard-sync-k8s-secret.sh
+	@STACK_NS=$$(yq eval '.stack.namespace // "platform"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml" 2>/dev/null || echo platform); \
+	export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	STACK_NS="$$STACK_NS" bash scripts/spot-guard-sync-k8s-secret.sh "$(CONFIG_ROOT)"
+
+# 立即触发一次集群内 CronJob（验收用）
+spot-guard-cron-run-now:
+	@export KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)"; \
+	STACK_NS=$$(yq eval '.stack.namespace // "platform"' "$(CONFIG_ROOT)/$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV).yaml" 2>/dev/null || echo platform); \
+	kubectl create job -n "$$STACK_NS" --from=cronjob/diting-spot-guard-watch "spot-guard-manual-$$(date +%s)"; \
+	echo "✅ 已创建一次性 Job · 查看: kubectl get jobs -n $$STACK_NS -l component=spot-guard"
+
+switch-stack-billing:
+	@chmod +x scripts/spot-switch-stack-billing.sh scripts/lib/spot-billing-lib.sh
+	@STACK="$(STACK)" BILLING="$(BILLING)" INTERACTIVE="$(INTERACTIVE)" bash scripts/spot-switch-stack-billing.sh
+
+redeploy-prod-spot-prefer:
+	@$(MAKE) spot-prefer-on-deploy
+	@SKIP_SPOT_PREFER=1 $(MAKE) deploy-diting-prod
+
+redeploy-prod-ondemand-fallback:
+	@SPOT_FORCE_BILLING=ondemand $(MAKE) spot-prefer-on-deploy
+	@SKIP_SPOT_PREFER=1 $(MAKE) deploy-diting-prod
 
 # ─── P-step_03 Makefile 合约（L3 §7.2）────────────────────────────────────
 .PHONY: platform-step03-prep platform-step03-up platform-step03-smoke platform-step03-test-persist platform-step03-all platform-persist-status

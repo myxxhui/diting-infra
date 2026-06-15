@@ -1,0 +1,72 @@
+{{- if and .Values.copilot.enabled .Values.spotGuardCron.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: diting-spot-guard-watch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting
+    component: spot-guard
+spec:
+  schedule: {{ .Values.spotGuardCron.schedule | default "*/15 * * * *" | quote }}
+  timeZone: {{ .Values.spotGuardCron.timeZone | default "Asia/Shanghai" | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.spotGuardCron.startingDeadlineSeconds | default 900 }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.spotGuardCron.activeDeadlineSeconds | default 600 }}
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ .Values.spotGuardCron.serviceAccountName | default "default" | quote }}
+          {{- with .Values.copilot.imagePullSecrets }}
+          imagePullSecrets:
+          {{- range . }}
+          - name: {{ if kindIs "string" . }}{{ . | quote }}{{ else }}{{ .name | default "" | quote }}{{ end }}
+          {{- end }}
+          {{- end }}
+          containers:
+          - name: spot-guard
+            image: "{{ .Values.copilot.image.repository }}:{{ .Values.copilot.image.tag }}"
+            imagePullPolicy: {{ .Values.copilot.image.pullPolicy }}
+            command: ["python", "-m", "apps.copilot.jobs.spot_guard_watch"]
+            envFrom:
+            - secretRef:
+                name: diting-copilot-conn
+            - secretRef:
+                name: diting-spot-guard
+                optional: true
+            env:
+            - name: SPOT_GUARD_PREFS_FILE
+              value: /config/spot-billing-prefs.yaml
+            - name: SPOT_GUARD_EMAIL_TO
+              value: {{ .Values.spotGuardCron.emailTo | default "huishaoqi@126.com" | quote }}
+            {{- with .Values.spotGuardCron.proxy }}
+            {{- if .host }}
+            - name: SPOT_GUARD_PROXY_HOST
+              value: {{ .host | quote }}
+            {{- end }}
+            - name: SPOT_GUARD_PROXY_PORT
+              value: {{ .port | default "3128" | quote }}
+            - name: SPOT_GUARD_PROXY_USER
+              value: {{ .user | default "ditingproxy" | quote }}
+            {{- end }}
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "500m"
+            volumeMounts:
+            - name: spot-guard-config
+              mountPath: /config
+              readOnly: true
+          volumes:
+          - name: spot-guard-config
+            configMap:
+              name: diting-spot-guard-config
+{{- end }}

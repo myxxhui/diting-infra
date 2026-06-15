@@ -87,6 +87,9 @@ fi
 echo ""
 if [ "$ERR" -eq 0 ]; then
   echo "=== 检查通过 · 可执行: make deploy diting prod ==="
+  echo "=== Spot 日常巡检（建议 cron 每 15 分钟）: make cluster-spot-watch CRON=1 ==="
+  echo "=== 巡检报告邮件 → huishaoqi@126.com（读 diting-src/.env COPILOT_SMTP_*）==="
+  echo "=== 交互式切换/恢复: make cluster-spot-watch INTERACTIVE=1 ==="
   exit 0
 fi
 echo "=== 检查未通过 · 请先修复上述项 ==="

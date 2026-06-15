@@ -231,7 +231,7 @@ echo "========== [业务第二梯队] 开始 =========="
 
 TMP_FULL="$(mktemp)"
 trap 'rm -f "$TMP_FULL"' EXIT INT TERM
-yq eval '{"storage": .stack.storage, "opensearch": .stack.opensearch, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot}' "$CFG" > "$TMP_FULL"
+yq eval '{"storage": .stack.storage, "opensearch": .stack.opensearch, "schemaInit": .stack.schemaInit, "module_a": .stack.module_a, "ingest": .stack.ingest, "copilot": .stack.copilot, "spotGuardCron": .stack.spotGuardCron}' "$CFG" > "$TMP_FULL"
 yq eval -i "
   .ingest.timescaleHost = \"timescaledb-postgresql.${STACK_NS}.svc.cluster.local\" |
   .ingest.postgresL2Host = \"postgresql-l2.${STACK_NS}.svc.cluster.local\" |
@@ -251,6 +251,15 @@ if yq eval '.copilot.enabled // false' "$TMP_FULL" | grep -q true; then
     .copilot.executingT0Jobs.bootstrapHook = false
   " "$TMP_FULL"
 fi
+if yq eval '.spotGuardCron.enabled // false' "$TMP_FULL" | grep -q true; then
+  PREFS_FILE="$CONFIG_ROOT/spot-billing-prefs.yaml"
+  if [ -f "$PREFS_FILE" ]; then
+    yq eval -i '.spotGuardCron.prefsYaml = load_str("'"$PREFS_FILE"'")' "$TMP_FULL"
+    printf '%s\n' "  [spot-guard] ConfigMap ← $PREFS_FILE"
+  else
+    echo "  [spot-guard] ⚠️ 缺少 $PREFS_FILE · CronJob 配置可能不完整"
+  fi
+fi
 helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$TMP_FULL" "${HELM_BIZ_T2_OPTS[@]}"
 rm -f "$TMP_FULL"
 trap - EXIT INT TERM
@@ -264,5 +273,6 @@ echo ""
 # ── prod.conn + 集群内 Secret ───────────────────────────────────────────
 "$SCRIPT_DIR/prod-write-conn.sh" "$CONFIG_ROOT" "deploy-engine" "$CONN_FILE" "$PROJECT" "$ENV" || true
 STACK_NS="$STACK_NS" "$SCRIPT_DIR/prod-sync-conn-secret.sh" "$CONFIG_ROOT" "$CONN_FILE" "$PROJECT" "$ENV"
+STACK_NS="$STACK_NS" bash "$SCRIPT_DIR/spot-guard-sync-k8s-secret.sh" "$CONFIG_ROOT"
 
 printf '%s\n' "[platform-step03-deploy] 完成: 基础设施第一+业务第一 Ready; 业务第二梯队异步拉起"

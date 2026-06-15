@@ -100,3 +100,23 @@ AI 在本仓内执行时须遵守上述限制；若用户请求修改 `charts/de
 - **本仓（diting-infra）为部署/编排的归属仓**：Docker Compose、本地验证用编排文件（如 `compose/docker-compose.ingest.yaml`、`compose/docker-compose.module-a.yaml`）须放在**本仓**，禁止放在 diting-src。
 - **新增 compose 或本地验证编排时**：在 **compose/** 下新增或修改，并在 04_ 实践文档中写明工作目录为 **diting-infra**、路径为 `compose/xxx.yaml`。
 - **diting-src** 仅保留：业务代码、构建镜像用 Dockerfile、单测与 `make build-*`；若发现 compose 或「连远程库验证」类编排在 core，须迁至本仓 `compose/` 并更新文档。
+
+---
+
+## Spot Guard · 竞价感知与巡检（Phase 1）
+
+规约全文：[`diting-doc/03_/_共享规约/31_Spot计费感知与巡检规约.md`](../diting-doc/03_原子目标与规约/_共享规约/31_Spot计费感知与巡检规约.md)
+
+| 场景 | 命令 |
+|------|------|
+| 部署（写 running 意图 + Spot 探测） | `make deploy diting prod` |
+| **本机** 15min 唯一巡检 + 邮件 | `make cluster-spot-watch CRON=1`（crontab） |
+| 查看 running/stopped | `make spot-intent-mark OP=status` |
+| 集群内 CronJob（可选 · 默认关） | `stack.spotGuardCron.enabled` |
+| 交互切换/恢复 | `make cluster-spot-watch INTERACTIVE=1` |
+| 抢占后按量恢复 | `make redeploy-prod-ondemand-fallback` |
+| 单 stack 切换 | `make switch-stack-billing STACK=base\|proxy BILLING=spot\|ondemand INTERACTIVE=1` |
+| 只读状态 | `make spot-billing-status` |
+
+**必守**：`policy.require_confirm_on_switch=true` · cron **不得**自动切换 · 配置真相源 `config/spot-billing-prefs.yaml` · **禁止**改 `deploy-engine/` 子模块（Phase 1 用 `config/.spot-active/` generated tfvars）。
+

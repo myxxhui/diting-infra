@@ -1,0 +1,14 @@
+▶ [cluster-spot-watch] 本地巡检（cron=1 interactive=0 间隔=15min）
+⚠️  [sg-proxy] 无法读取账户余额，跳过预检
+ℹ️  [sg-proxy] Terraform output 为空，已从云上实例回填 ip=47.237.76.203 instance=?
+▶ [cluster-spot-watch] 运行意图 / 计费
+  proxy: 预期运行 · ecs=1 eip=1 billing=spot k8s=1 proxy_ok=1
+  base: 预期运行 · ecs=1 eip=1 billing=spot k8s=1 proxy_ok=1
+结论=HEALTHY · 已写入 /Users/huishaoqi/Desktop/workspace/diting-infra/config/.spot-watch-last-report.json
+▶ [cluster-spot-watch] 结论=HEALTHY
+   运行意图与云状态一致 · k8s=1 proxy_ok=1
+  · proxy: intent=running billing=spot last_down=-
+  · base: intent=running billing=spot last_down=-
+
+✅ [cluster-spot-watch] 无异常（含预期关闭栈不发告警）
+✅ [spot-watch-email] 已发送至 huishaoqi@126.com · 结论=HEALTHY

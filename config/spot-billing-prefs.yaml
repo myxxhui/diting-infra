@@ -1,0 +1,36 @@
+# Spot 计费策略 · 配置真相源
+# [Ref: diting-doc/03_/_共享规约/31_Spot计费感知与巡检规约.md]
+version: 1
+policy:
+  default: spot_first          # spot_first | ondemand_only
+  require_confirm_on_switch: true
+  watch_interval_minutes: 15   # cron 建议间隔（须 INTERACTIVE=1 才执行切换）
+
+watch_email:
+  enabled: true
+  smtp_env_file: ../diting-src/.env   # 与 Copilot 告警同源 COPILOT_SMTP_*
+  to: huishaoqi@126.com               # 巡检报告收件（126 邮箱）
+  send_on_cron: true                  # CRON=1 时发信
+  send_on_healthy: true               # HEALTHY 也发摘要（便于确认 cron 存活）
+
+stacks:
+  proxy:
+    project: diting
+    env: sg-proxy
+    region: ap-southeast-1
+    stack_id: proxy
+    instance_type: ecs.e-c1m2.large
+    preferred_zone: ""         # 空 = 任意可用区
+    spot_strategy: SpotAsPriceGo
+    spot_price_limit: 0.08
+    ondemand_fallback: true
+  base:
+    project: diting
+    env: prod
+    region: cn-hongkong
+    stack_id: base
+    instance_type: ecs.u1-c1m4.large
+    preferred_zone: cn-hongkong-b
+    spot_strategy: SpotAsPriceGo
+    spot_price_limit: 0.6
+    ondemand_fallback: true

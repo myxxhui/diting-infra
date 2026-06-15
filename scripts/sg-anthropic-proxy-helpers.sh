@@ -433,7 +433,12 @@ sg_proxy_import_cloud_instance() {
 
   [ -n "$instance_id" ] || return 1
   local tf_dir="$infra_root/deploy-engine/deploy/terraform/alicloud"
-  local tfvars="$infra_root/config/terraform-${project}-${env}.tfvars"
+  local tfvars cfg_root
+  cfg_root="${SPOT_TFVARS_ROOT:-$infra_root/config}"
+  tfvars="$cfg_root/terraform-${project}-${env}.tfvars"
+  if [ ! -f "$tfvars" ]; then
+    tfvars="$infra_root/config/terraform-${project}-${env}.tfvars"
+  fi
   local cfg="$infra_root/config/${project}-${env}.yaml"
 
   sg_proxy_tf_init "$infra_root" "$project" "$env"

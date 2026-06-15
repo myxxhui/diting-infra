@@ -21,7 +21,13 @@ sg_proxy_load_env "$INFRA_ROOT"
   exit 1
 }
 export TF_VAR_instance_password
-export CONFIG_ROOT="$INFRA_ROOT/config"
+if [ -d "$INFRA_ROOT/config/.spot-active" ] && [ -f "$INFRA_ROOT/config/.spot-active/terraform-diting-sg-proxy.tfvars" ]; then
+  export CONFIG_ROOT="$INFRA_ROOT/config/.spot-active"
+  export SPOT_TFVARS_ROOT="$CONFIG_ROOT"
+else
+  export CONFIG_ROOT="$INFRA_ROOT/config"
+fi
+SPOT_TFVARS_FILE="$CONFIG_ROOT/terraform-diting-sg-proxy.tfvars"
 
 PROXY_PASSWORD="$(sg_proxy_resolve_password "$INFRA_ROOT")" || {
   echo "错误: 无法解析代理密码（ANTHROPIC_PROXY_PASSWORD / TF_VAR_instance_password）"
@@ -57,10 +63,12 @@ fi
 
 if sg_proxy_state_has_instance "$INFRA_ROOT" "$PROJECT" "$ENV"; then
   echo "▶ [deploy-sg-anthropic-proxy] state 有 proxy 记录 → up-proxy"
-  make -C "$INFRA_ROOT/deploy-engine" up-proxy "$PROJECT" "$ENV"
+  make -C "$INFRA_ROOT/deploy-engine" up-proxy "$PROJECT" "$ENV" CONFIG_ROOT="$CONFIG_ROOT" \
+    TF_VAR_FILE="$SPOT_TFVARS_FILE"
 else
   echo "▶ [deploy-sg-anthropic-proxy] 无可用 proxy → deploy-proxy（创建前已清理孤儿）"
-  make -C "$INFRA_ROOT/deploy-engine" deploy-proxy "$PROJECT" "$ENV"
+  make -C "$INFRA_ROOT/deploy-engine" deploy-proxy "$PROJECT" "$ENV" CONFIG_ROOT="$CONFIG_ROOT" \
+    TF_VAR_FILE="$SPOT_TFVARS_FILE"
 fi
 
 sg_proxy_read_outputs "$INFRA_ROOT" "$PROJECT" "$ENV" "$ENV" || {

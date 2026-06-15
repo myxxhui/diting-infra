@@ -176,6 +176,11 @@ stack:
       tag: latest
       pullPolicy: Always
     imagePullSecrets: ["acr-titan"]
+    # 集群内 L1/L2 与 copilot.postgres.host 同命名空间（platform）；勿用 chart 默认 default.svc
+    timescaleHost: "timescaledb-postgresql.platform.svc.cluster.local"
+    timescalePort: "5432"
+    postgresL2Host: "postgresql-l2.platform.svc.cluster.local"
+    postgresL2Port: "5432"
     timescaleUser: "postgres"
     timescalePassword: "postgres"
     postgresL2User: "postgres"
@@ -337,6 +342,9 @@ stack:
       defaults:
         crawl_years: [2022, 2023, 2024, 2025]
         throttle_sec: 0.6
+  # Spot Guard · 主路径本机 CRON=1；K3s CronJob 默认关闭 [Ref: 31_ §3]
+  spotGuardCron:
+    enabled: false
   # 数据库部署参数（供脚本调用 bitnami/postgresql、bitnami/redis 使用）
   # 服务暴露方式由此处与 Chart 控制，Makefile 仅从本配置读取并传递 helm，不写死（见系统规则「部署内容由配置与 Chart 控制」）
   databases:
