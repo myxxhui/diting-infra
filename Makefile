@@ -204,8 +204,9 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 			fi; \
 		fi; \
 	fi
-	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/terraform-output-safe.sh scripts/prod-disk-state-handoff.sh
+	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/reconcile-prod-data-snapshot-terraform.sh scripts/terraform-output-safe.sh scripts/prod-disk-state-handoff.sh
 	@bash scripts/ensure-prod-data-snapshot-policy.sh
+	@bash scripts/reconcile-prod-data-snapshot-terraform.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 	@CONFIG_ROOT="$(CONFIG_ROOT)" bash scripts/prod-disk-state-handoff.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV) || true
 	@echo ""
 	@echo "=========================================="
@@ -753,10 +754,11 @@ audit-prod-disks:
 	@chmod +x scripts/audit-prod-disks.sh scripts/terraform-output-safe.sh
 	@bash scripts/audit-prod-disks.sh $(AUDIT_DISK_ARGS)
 
-.PHONY: ensure-prod-data-snapshot
+.PHONY: ensure-prod-data-snapshot reconcile-prod-data-snapshot
 ensure-prod-data-snapshot:
-	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/terraform-output-safe.sh
+	@chmod +x scripts/ensure-prod-data-snapshot-policy.sh scripts/reconcile-prod-data-snapshot-terraform.sh scripts/terraform-output-safe.sh
 	@bash scripts/ensure-prod-data-snapshot-policy.sh
+	@bash scripts/reconcile-prod-data-snapshot-terraform.sh $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
 sync-anthropic-proxy-to-copilot:
 	@chmod +x scripts/sync-anthropic-proxy-to-copilot.sh
@@ -803,6 +805,22 @@ copilot-wave4-deploy:
 copilot-wave4-verify:
 	@chmod +x scripts/copilot-wave4-verify.sh
 	@KUBECONFIG="$(KUBECONFIG)" CONN_FILE="$(CONN_FILE)" bash scripts/copilot-wave4-verify.sh
+
+# step_18 · 五区工作台 P0（33_ §12）
+.PHONY: copilot-step18-test copilot-step18-verify copilot-step18-deploy copilot-step18-prod-all
+copilot-step18-test:
+	@$(MAKE) -C ../diting-src copilot-step18-test
+
+copilot-step18-verify:
+	@chmod +x scripts/copilot-workbench-p0-verify.sh
+	@KUBECONFIG="$(KUBECONFIG)" CONN_FILE="$(CONN_FILE)" bash scripts/copilot-workbench-p0-verify.sh
+
+copilot-step18-deploy:
+	@chmod +x scripts/copilot-step18-prod-deploy.sh
+	@KUBECONFIG="$(KUBECONFIG)" CONN_FILE="$(CONN_FILE)" bash scripts/copilot-step18-prod-deploy.sh
+
+copilot-step18-prod-all: copilot-step18-test copilot-step18-verify
+	@echo "✅ [copilot-step18-prod-all] 本机单测 + 生产 P0 HTTP 验收完成"
 
 .PHONY: radar-t0-sync radar-t0-collect-prod
 radar-t0-sync:

@@ -43,15 +43,6 @@ spec:
         - |
           until nc -z {{ .Values.copilot.postgres.host }} {{ .Values.copilot.postgres.port }}; do sleep 2; done
       {{- end }}
-      {{- if .Values.opensearch.enabled }}
-      - name: wait-for-opensearch
-        image: busybox:1.36
-        command:
-        - sh
-        - -c
-        - |
-          until nc -z {{ .Values.opensearch.serviceName }} {{ .Values.opensearch.service.port }}; do sleep 2; done
-      {{- end }}
       containers:
       - name: arq-worker
         image: "{{ .Values.copilot.image.repository }}:{{ .Values.copilot.image.tag }}"

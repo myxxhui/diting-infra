@@ -155,10 +155,53 @@ disk = run("DescribeDisks", DiskIds=json.dumps([disk_id]))
 disks = disk.get("Disks", {}).get("Disk") or []
 if not disks:
     raise SystemExit(f"❌ 磁盘不存在: {disk_id}")
+
+def list_policies_with_disks():
+    """列出本 region 内 DiskNums>0 的快照策略（用于多策略 reconciler）。"""
+    out = []
+    page = 1
+    while True:
+        data = run("DescribeAutoSnapshotPolicyEx", PageNumber=str(page), PageSize="50")
+        batch = data.get("AutoSnapshotPolicies", {}).get("AutoSnapshotPolicy") or []
+        if not batch:
+            break
+        for pol in batch:
+            if int(pol.get("DiskNums") or 0) > 0:
+                out.append(pol)
+        total = int(data.get("TotalCount") or 0)
+        if page * 50 >= total:
+            break
+        page += 1
+    return out
+
+def cancel_policy_on_disk(policy_id, reason=""):
+    if not policy_id or policy_id == pid:
+        return
+    try:
+        run(
+            "CancelAutoSnapshotPolicy",
+            autoSnapshotPolicyId=policy_id,
+            diskIds=json.dumps([disk_id]),
+        )
+        log(f"▶ 已解绑冗余策略 {policy_id} ← 盘 {disk_id}" + (f" ({reason})" if reason else ""))
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "NotFound" in msg or "InvalidAutoSnapshotPolicyId" in msg:
+            return
+        raise
+
+# 多策略 reconciler：盘上仅保留 canonical pid（显式 autoSnapshotPolicyId，避免 TooMany 403）
+for pol in list_policies_with_disks():
+    other = (pol.get("AutoSnapshotPolicyId") or "").strip()
+    if other and other != pid:
+        name = pol.get("AutoSnapshotPolicyName") or other
+        cancel_policy_on_disk(other, name)
+
+disk = run("DescribeDisks", DiskIds=json.dumps([disk_id]))
+disks = disk.get("Disks", {}).get("Disk") or []
 cur = (disks[0].get("AutoSnapshotPolicyId") or "").strip()
 if cur and cur != pid:
-    log(f"▶ 磁盘已绑定旧策略 {cur}，改绑 → {pid}")
-    run("CancelAutoSnapshotPolicy", autoSnapshotPolicyId=cur, diskIds=json.dumps([disk_id]))
+    cancel_policy_on_disk(cur, "DescribeDisks.AutoSnapshotPolicyId")
 
 if cur != pid:
     run("ApplyAutoSnapshotPolicy", autoSnapshotPolicyId=pid, diskIds=json.dumps([disk_id]))

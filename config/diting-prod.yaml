@@ -194,7 +194,7 @@ stack:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
       # 与线上一致 · make copilot-deploy 会由 copilot-image-tag.sh 自动回写 tag
       # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
-      tag: "d83d236c-dee1d2d5"
+      tag: "f038fed9-dd9d8613"
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
@@ -317,6 +317,27 @@ stack:
         - id: l3-fii-gb200-milestone
           schedule: "0 17 * * 1-5"
           activeDeadlineSeconds: 3600
+    # Z0 段 A 宏观指标 · Cron 仅 enqueue · ARQ Worker 消费 [Ref: 34_ §3.0b]
+    z0T0Jobs:
+      enabled: true
+      timeZone: Asia/Shanghai
+      startingDeadlineSeconds: 3600
+      cronjobs:
+        - id: z0-m1-macro
+          schedule: "0 7 * * *"
+          activeDeadlineSeconds: 900
+        - id: z0-m5-liquidity
+          schedule: "30 7 * * 1-5"
+          activeDeadlineSeconds: 900
+        - id: z0-policy-ingest
+          schedule: "45 7 * * 1-5"
+          activeDeadlineSeconds: 1800
+        - id: z0-m2-sector-heat
+          schedule: "0 8 * * 1-5"
+          activeDeadlineSeconds: 1800
+        - id: z0-m0-wind-scan
+          schedule: "15 8 * * 1-5"
+          activeDeadlineSeconds: 900
     # 28_ daily-pipeline / migrate 曾 OOM(137) · 与 values 默认对齐 1.5Gi
     resources:
       requests:

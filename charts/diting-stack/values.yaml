@@ -378,6 +378,27 @@ copilot:
       - id: daily-pipeline
         schedule: "45 18 * * 1-5"
         activeDeadlineSeconds: 3600
+  # Z0 段 A 宏观指标 CronJob · ARQ enqueue [Ref: 34_ §3.0b · 29_ §2]
+  z0T0Jobs:
+    enabled: false
+    timeZone: Asia/Shanghai
+    startingDeadlineSeconds: 3600
+    cronjobs:
+      - id: z0-m1-macro
+        schedule: "0 7 * * *"
+        activeDeadlineSeconds: 900
+      - id: z0-m5-liquidity
+        schedule: "30 7 * * 1-5"
+        activeDeadlineSeconds: 900
+      - id: z0-policy-ingest
+        schedule: "45 7 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: z0-m2-sector-heat
+        schedule: "0 8 * * 1-5"
+        activeDeadlineSeconds: 1800
+      - id: z0-m0-wind-scan
+        schedule: "15 8 * * 1-5"
+        activeDeadlineSeconds: 900
   smtp:
     enabled: false
     host: ""

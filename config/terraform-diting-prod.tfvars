@@ -33,8 +33,9 @@ enable_prod_data_disk = true
 data_disk_size        = 100
 data_disk_category    = "cloud_essd"
 
-# 权威数据盘自动快照：每日 16:00 (UTC+8，15:30 后首个整点) · 保留 7 天
-enable_prod_data_disk_snapshot     = true
+# 权威数据盘自动快照：由 diting-infra/scripts/ensure-prod-data-snapshot-policy.sh 管理（读 diting-prod.yaml）
+# 禁止与 Terraform 双写；若设为 true，deploy 时可能触发 TooManyAutoSnapshotPolicies
+enable_prod_data_disk_snapshot     = false
 prod_data_snapshot_time_points     = ["16"]
 prod_data_snapshot_retention_days  = 7
 prod_data_snapshot_repeat_weekdays = ["1", "2", "3", "4", "5", "6", "7"]
