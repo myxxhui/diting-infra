@@ -236,6 +236,11 @@ copilot:
       limits:
         memory: "1536Mi"
         cpu: "1000m"
+  # 内部调度器 · 替代 K8s CronJob [Ref: 29_ §6.2]
+  scheduler:
+    enabled: false
+    replicas: 1
+    disabledJobs: []
   radarT0CacheDir: "/data/radar_t0_cache"
   radarT0CacheMaxAgeHours: "24"
   radarT0RetentionDays: "1"

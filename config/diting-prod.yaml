@@ -194,7 +194,7 @@ stack:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
       # 与线上一致 · make copilot-deploy 会由 copilot-image-tag.sh 自动回写 tag
       # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
-      tag: "f038fed9-dd9d8613"
+      tag: "43665677-d35c1693"
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
@@ -224,6 +224,12 @@ stack:
         limits:
           memory: "1536Mi"
           cpu: "1000m"
+    # 内部调度器 · 替代 K8s CronJob [Ref: 29_ §6.2 · §7 Phase 1]
+    # 所有 JL4/L3 采集定时由 APScheduler 常驻进程管理 → ARQ enqueue → ARQ Worker 消费
+    scheduler:
+      enabled: true
+      replicas: 1
+      disabledJobs: [] # 禁用的 job_id 列表，如 ["l3-fii-gb200-milestone"]
     # 行情雷达模式 C 深度研报：T2 Opus 开关 + 模型；anthropicApiKey 由
     # copilot-sync-ai-from-src-env.sh 从 diting-src/.env 注入（密钥不入库）
     ai:
@@ -250,73 +256,14 @@ stack:
     radarT0Jobs:
       enabled: false
       bootstrapHook: false
-    # 28_ 执行中：#15+#16 双探针（盘中 quote */5 + 15m vol-div + 16:00 PG 日线）
+    # 28_ 执行中：全部采集调度已迁移至内部 scheduler（替代 K8s CronJob）
+    # cronjobs 留空 —— 所有定时由 diting-copilot-scheduler Deployment 管理
     executingT0Jobs:
       enabled: true
       bootstrapHook: false
       enqueueJobIdPrefixes:
         - "l3-"
-      cronjobs:
-        - id: quote-intraday
-          schedule: "*/5 9-14 * * 1-5"
-          activeDeadlineSeconds: 600
-        - id: quote-intraday-close
-          schedule: "0 15 * * 1-5"
-          activeDeadlineSeconds: 600
-        - id: l4-vol-div-15m
-          schedule: "0,15,30,45 10-11,13-14 * * 1-5"
-          activeDeadlineSeconds: 900
-        - id: l4-vol-div-15m-open
-          schedule: "45 9 * * 1-5"
-          activeDeadlineSeconds: 900
-        - id: l4-vol-div-15m-close
-          schedule: "0 15 * * 1-5"
-          activeDeadlineSeconds: 900
-        - id: l4-smart-money-backfill
-          schedule: "0 14 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l4-smart-money-eod
-          schedule: "0 16 * * 1-5"
-          activeDeadlineSeconds: 900
-        - id: l2-super-order-backfill
-          schedule: "0 14 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l2-super-order-eod
-          schedule: "0 17 * * 1-5"
-          activeDeadlineSeconds: 900
-        - id: l4-margin-skew-morning
-          schedule: "30 8 * * 2-6"
-          activeDeadlineSeconds: 3600
-        - id: l4-turnover-accel-eod
-          schedule: "30 15 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l4-beta-correlation-eod
-          schedule: "30 15 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l4-block-trade-eod
-          schedule: "0 18 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l4-retail-concentration-eod
-          schedule: "30 20 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l4-insider-sell-eod
-          schedule: "30 20 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l4-etf-redemption-morning
-          schedule: "30 8 * * 2-6"
-          activeDeadlineSeconds: 3600
-        - id: l4-atr-bars-sync
-          schedule: "0 16 * * 1-5"
-          activeDeadlineSeconds: 900
-        - id: l3-fii-twse-monthly
-          schedule: "0 8 5-12 * *"
-          activeDeadlineSeconds: 1800
-        - id: l3-fii-odm-quarterly
-          schedule: "0 20 * * 1-5"
-          activeDeadlineSeconds: 3600
-        - id: l3-fii-gb200-milestone
-          schedule: "0 17 * * 1-5"
-          activeDeadlineSeconds: 3600
+      cronjobs: []
     # Z0 段 A 宏观指标 · Cron 仅 enqueue · ARQ Worker 消费 [Ref: 34_ §3.0b]
     z0T0Jobs:
       enabled: true

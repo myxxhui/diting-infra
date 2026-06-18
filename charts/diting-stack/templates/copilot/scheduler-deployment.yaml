@@ -1,0 +1,75 @@
+{{- if and .Values.copilot.enabled .Values.copilot.scheduler.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diting-copilot-scheduler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: diting
+    component: copilot-scheduler
+spec:
+  replicas: {{ .Values.copilot.scheduler.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: diting
+      component: copilot-scheduler
+  template:
+    metadata:
+      labels:
+        app: diting
+        component: copilot-scheduler
+    spec:
+      {{- with .Values.copilot.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range . }}
+      - name: {{ if kindIs "string" . }}{{ . | quote }}{{ else }}{{ .name | default "" | quote }}{{ end }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z {{ .Values.copilot.redisHost }} {{ .Values.copilot.redisPort }}; do sleep 2; done
+      {{- if .Values.copilot.postgres.enabled }}
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z {{ .Values.copilot.postgres.host }} {{ .Values.copilot.postgres.port }}; do sleep 2; done
+      {{- end }}
+      containers:
+      - name: scheduler
+        image: "{{ .Values.copilot.image.repository }}:{{ .Values.copilot.image.tag }}"
+        imagePullPolicy: {{ .Values.copilot.image.pullPolicy }}
+        command: ["python", "-m", "apps.copilot.workers.scheduler"]
+        envFrom:
+        - secretRef:
+            name: diting-copilot-conn
+        env:
+        - name: DEPLOY_REGION
+          value: "cn-hongkong"
+        {{- with .Values.copilot.scheduler.disabledJobs }}
+        - name: COPILOT_SCHEDULER_DISABLED_JOBS
+          value: {{ join "," . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import os; exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 60
+{{- end }}
