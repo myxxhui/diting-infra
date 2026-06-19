@@ -194,7 +194,7 @@ stack:
       repository: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com/titan-core/diting-copilot
       # 与线上一致 · make copilot-deploy 会由 copilot-image-tag.sh 自动回写 tag
       # 干净提交=git short sha；脏工作区=sha-d<diff-hash>，避免同 tag 覆盖旧 digest
-      tag: "43665677-d35c1693"
+      tag: "3b38f569"
       pullPolicy: Always
     # Copilot 业务库：PostgreSQL（postgresql-l2 实例 · ESSD 数据盘 hostPath · ECS 复挂同盘不丢库）
     postgres:
