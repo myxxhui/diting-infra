@@ -1,0 +1,6 @@
+Defaulted container "copilot" out of: copilot, wait-for-redis (init), wait-for-postgres (init)
+  File "/dev/stdin", line 5
+    
+    ^
+SyntaxError: '(' was never closed
+command terminated with exit code 1
