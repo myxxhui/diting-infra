@@ -78,15 +78,18 @@ resolve_public_ip() {
   local tf_dir="$1" engine_root="$2" project="$3" env="$4"
   local val kubeconfig state_file
 
-  val=$(tf_output_raw_safe "$tf_dir" public_ip)
-  _is_valid_public_ip "$val" && { printf '%s' "$val"; return 0; }
-
+  # 1. deploy-engine 按 project/env 写入的 state（与 prod K3s 一致，不受 sg-proxy terraform 污染）
   state_file="${engine_root}/deploy-engine/.deploy/state-${project}-${env}.json"
   val=$(public_ip_from_deploy_state "$state_file")
   _is_valid_public_ip "$val" && { printf '%s' "$val"; return 0; }
 
+  # 2. kubeconfig（kubecm 注册后的 API 地址）
   kubeconfig="${HOME}/.kube/config-${project}-${env}"
   val=$(public_ip_from_kubeconfig "$kubeconfig")
+  _is_valid_public_ip "$val" && { printf '%s' "$val"; return 0; }
+
+  # 3. terraform output（同一 tf_dir 可能在 prod/sg-proxy 间切换 backend，仅兜底）
+  val=$(tf_output_raw_safe "$tf_dir" public_ip)
   _is_valid_public_ip "$val" && { printf '%s' "$val"; return 0; }
 
   return 1

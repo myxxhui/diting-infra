@@ -150,7 +150,9 @@ deploy-data-db-prod: deploy-diting-prod
 down-data-db-prod: down-diting-prod
 
 # make deploy diting prod 的实际执行 target。若 Terraform state 中 NAS 访问组仍为 dev 共享（diting_nas_group_dev），deploy 时会尝试 replace 并销毁该资源导致 InvalidAccessGroup.AlreadyAttached；Up 前先从 state 移除，让 Terraform 仅创建 prod 自有 NAS
+deploy-diting-prod: export DEPLOY_WARNINGS_FILE := $(CURDIR)/.deploy-warnings
 deploy-diting-prod: update-deploy-engine check-deploy-prereqs
+	@rm -f "$(DEPLOY_WARNINGS_FILE)"; touch "$(DEPLOY_WARNINGS_FILE)"
 	@if [ "$${SKIP_SPOT_PREFER:-0}" != "1" ]; then \
 		chmod +x scripts/spot-prefer-on-deploy.sh scripts/lib/spot-billing-lib.sh; \
 		bash scripts/spot-prefer-on-deploy.sh; \
@@ -262,11 +264,20 @@ deploy-diting-prod: update-deploy-engine check-deploy-prereqs
 	@chmod +x scripts/spot-intent-mark.sh scripts/lib/spot-billing-lib.sh
 	@bash scripts/spot-intent-mark.sh up
 	@$(MAKE) prod-deploy-summary
+	@if [ -s "$(DEPLOY_WARNINGS_FILE)" ]; then \
+		_n=$$(grep -cve '^[[:space:]]*$$' "$(DEPLOY_WARNINGS_FILE)" 2>/dev/null || wc -l < "$(DEPLOY_WARNINGS_FILE)" | tr -d ' '); \
+		echo ""; \
+		echo "✅ make deploy diting prod 完成（有 $$_n 条非阻塞告警，见上方「部署告警汇总」）"; \
+	else \
+		echo ""; \
+		echo "✅ make deploy diting prod 完成"; \
+	fi
 
 # 部署收尾：业务访问地址与验收指引
 prod-deploy-summary:
-	@chmod +x scripts/prod-deploy-summary.sh
+	@chmod +x scripts/prod-deploy-summary.sh scripts/lib/deploy-warnings-lib.sh
 	@KUBECONFIG="$$HOME/.kube/config-$(PROD_DATA_ENV_PROJECT)-$(PROD_DATA_ENV_ENV)" \
+		DEPLOY_WARNINGS_FILE="$(DEPLOY_WARNINGS_FILE)" \
 		scripts/prod-deploy-summary.sh "$(CONFIG_ROOT)" "$(CONN_FILE)" $(PROD_DATA_ENV_PROJECT) $(PROD_DATA_ENV_ENV)
 
 # 将连接信息写入 prod.conn（EIP 与 NodePort 从 deploy-engine 输出或 kubectl 获取）
@@ -725,18 +736,8 @@ fix-sg-3proxy-systemd:
 
 # 仅探测新加坡代理是否可用（不创建 ECS/EIP）
 verify-sg-anthropic-proxy:
-	@chmod +x scripts/sg-anthropic-proxy-helpers.sh
-	@bash -c '\
-		source scripts/sg-anthropic-proxy-helpers.sh; \
-		INFRA="$(CURDIR)"; CONN="$$INFRA/sg-proxy.conn"; PROJ=diting; \
-		ENV=$$(yq eval ".anthropic_proxy.deploy_engine_env // \"sg-proxy\"" "$(CONFIG_ROOT)/diting-prod.yaml"); \
-		USER=$$(yq eval ".anthropic_proxy.user // \"ditingproxy\"" "$(CONFIG_ROOT)/diting-prod.yaml"); \
-		PORT=$$(yq eval ".anthropic_proxy.port // 3128" "$(CONFIG_ROOT)/diting-prod.yaml"); \
-		sg_proxy_load_env "$$INFRA"; PW=$$(sg_proxy_resolve_password "$$INFRA"); \
-		sg_proxy_resolve_endpoint "$$INFRA" $$PROJ $$ENV "$$CONN" "$$PORT" || { echo "❌ 无 proxy output/conn"; exit 1; }; \
-		sg_proxy_health_check "$$PROXY_IP" "$${PROXY_PORT:-$$PORT}" "$$USER" "$$PW" 1 1 \
-			&& echo "✅ sg-proxy 健康 ip=$$PROXY_IP port=$${PROXY_PORT:-$$PORT}" \
-			|| { echo "❌ sg-proxy 不可用 ip=$$PROXY_IP"; exit 1; }'
+	@chmod +x scripts/sg-anthropic-proxy-helpers.sh scripts/lib/deploy-warnings-lib.sh scripts/verify-sg-anthropic-proxy.sh
+	@CONFIG_ROOT="$(CONFIG_ROOT)" DEPLOY_WARNINGS_FILE="$(DEPLOY_WARNINGS_FILE)" bash scripts/verify-sg-anthropic-proxy.sh
 
 down-sg-anthropic-proxy:
 	@chmod +x scripts/down-sg-anthropic-proxy.sh

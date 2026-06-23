@@ -9,11 +9,18 @@ PROJECT="${3:-diting}"
 ENV="${4:-prod}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=lib/deploy-warnings-lib.sh
+source "$SCRIPT_DIR/lib/deploy-warnings-lib.sh"
+# shellcheck source=terraform-output-safe.sh
+source "$SCRIPT_DIR/terraform-output-safe.sh"
 case "$CONN_FILE" in /*) ;; *) CONN_FILE="$INFRA_ROOT/$CONN_FILE" ;; esac
 CFG="$CONFIG_ROOT/${PROJECT}-${ENV}.yaml"
+DEPLOY_WARNINGS_FILE="${DEPLOY_WARNINGS_FILE:-$INFRA_ROOT/.deploy-warnings}"
 KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-${PROJECT}-${ENV}}"
 
 command -v yq >/dev/null 2>&1 || { echo "错误: 需要 yq"; exit 1; }
+
+_RESOLVED_IP="$(resolve_public_ip "$INFRA_ROOT/deploy-engine/deploy/terraform/alicloud" "$INFRA_ROOT" "$PROJECT" "$ENV" 2>/dev/null || true)"
 
 PUBLIC_IP="<EIP>"
 TIMESCALE_DSN=""
@@ -25,7 +32,13 @@ if [ -f "$CONN_FILE" ]; then
   PG_L2_DSN="$(grep -E '^PG_L2_DSN=' "$CONN_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
   REDIS_URL="$(grep -E '^REDIS_URL=' "$CONN_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
 fi
-[ -z "$PUBLIC_IP" ] && PUBLIC_IP="<EIP>"
+if _is_valid_public_ip "$_RESOLVED_IP"; then
+  if [ "$PUBLIC_IP" != "$_RESOLVED_IP" ]; then
+    deploy_warn "prod.conn PUBLIC_IP=${PUBLIC_IP} 与集群实际 ${_RESOLVED_IP} 不一致，总结以集群 IP 为准（请 make prod-write-conn 修正）"
+    PUBLIC_IP="$_RESOLVED_IP"
+  fi
+fi
+[ -z "$PUBLIC_IP" ] || [ "$PUBLIC_IP" = "<EIP>" ] && PUBLIC_IP="${_RESOLVED_IP:-<EIP>}"
 
 STACK_NS="$(yq eval '.stack.namespace // "platform"' "$CFG" 2>/dev/null || echo platform)"
 COPILOT_PORT="$(yq eval '.stack.copilot.service.nodePort // 30080' "$CFG" 2>/dev/null || echo 30080)"
@@ -110,3 +123,5 @@ echo ""
 echo "【说明】"
 echo "  make Entering/Leaving 为子 make 递归日志，已默认抑制；业务 Pod/CronJob 由 K8s 异步监管。"
 echo ""
+
+deploy_warn_summary || true

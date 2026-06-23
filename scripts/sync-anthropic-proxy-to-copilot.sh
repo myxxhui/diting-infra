@@ -98,6 +98,13 @@ kubectl cluster-info --request-timeout=10s >/dev/null 2>&1 || {
   echo "错误: 无法连接 diting-prod 集群（server=${_SERVER:-}）"
   exit 1
 }
+set +e
 bash "$SCRIPT_DIR/copilot-sync-ai-from-src-env.sh"
+_copilot_sync_rc=$?
+set -e
+if [ "$_copilot_sync_rc" -ne 0 ]; then
+  echo "❌ [sync-anthropic-proxy] Copilot AI env 同步失败" >&2
+  exit 1
+fi
 echo "✅ [sync-anthropic-proxy] 已合并 $SRC_ENV 并 helm 提交 platform/diting-copilot（业务第二梯队 · 不等待 Pod Ready）"
 echo "   查看: kubectl get pods -n platform -l app.kubernetes.io/name=diting-copilot"

@@ -8,6 +8,9 @@ prod.disk_id
 prod.snapshot_policy_id
 sg-proxy.conn
 
+# 部署非阻塞告警（make deploy diting prod 运行时写入，收尾汇总后删除）
+.deploy-warnings
+
 # 生产 Terraform 变量（含 instance_password 等敏感项；请用 config/terraform-diting-prod.tfvars.example 复制后本地填写，并用 TF_VAR_instance_password 注入密码）
 config/.generated/
 config/.spot-active/

@@ -5,6 +5,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=lib/deploy-warnings-lib.sh
+source "$SCRIPT_DIR/lib/deploy-warnings-lib.sh"
 SRC_ENV="${SRC_ENV:-$INFRA_ROOT/../diting-src/.env}"
 CFG="${CONFIG_ROOT:-$INFRA_ROOT/config}/diting-prod.yaml"
 STACK_NS="$(yq eval '.stack.namespace // "platform"' "$CFG")"
@@ -18,18 +20,22 @@ set -a && source "$SRC_ENV" && set +a
 [ -n "${ANTHROPIC_API_KEY:-}" ] \
   || { echo "错误: $SRC_ENV 缺 ANTHROPIC_API_KEY（模式 C T2 Opus 必需）"; exit 1; }
 
-# 部署前探活：避免无效 key 或失效代理 IP 覆盖集群内仍有效的 Secret
-# 仅改前端/镜像、本地代理不可达时：COPILOT_SKIP_ANTHROPIC_PROBE=1 make copilot-deploy-rollout
+# make deploy diting prod 链路内探活失败不中断部署：告警 + 保留集群 key + 继续 helm
+export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
+_HELM_ANTH_KEY="${ANTHROPIC_API_KEY}"
+_INJECT_ANTH_PROXY=1
+_probe_rc=0
 if command -v python3 >/dev/null 2>&1 && [ "${COPILOT_SKIP_ANTHROPIC_PROBE:-0}" != "1" ]; then
   _SRC_ROOT="${SRC_ROOT:-$INFRA_ROOT/../diting-src}"
   _PYTHON="${COPILOT_SYNC_PYTHON:-$_SRC_ROOT/.venv/bin/python3}"
   if [ ! -x "$_PYTHON" ]; then
     _PYTHON="$(command -v python3.11 || command -v python3.10 || command -v python3.9 || command -v python3)"
   fi
+  set +e
   ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
     ANTHROPIC_HTTPS_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}" \
     ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" \
-    PYTHONPATH="$_SRC_ROOT" "$_PYTHON" - <<'PY' || { echo "错误: Anthropic 探活失败（key/代理不可达），已中止 helm 以免覆盖生产 Secret"; exit 1; }
+    PYTHONPATH="$_SRC_ROOT" "$_PYTHON" - <<'PY'
 import os, sys
 from apps.common.ai_dispatcher import AIDispatcher, probe_anthropic_proxy_tcp
 
@@ -38,7 +44,7 @@ if os.environ.get("ANTHROPIC_HTTPS_PROXY", "").strip():
     ok, detail = probe_anthropic_proxy_tcp()
     if not ok:
         print(f"[copilot-sync-ai] {detail}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(10)
     print(f"[copilot-sync-ai] Anthropic 代理 TCP 探活 OK · {detail}")
 
 d = AIDispatcher(anthropic_key=os.environ["ANTHROPIC_API_KEY"])
@@ -46,12 +52,37 @@ try:
     r = d.call("critic", [{"role": "user", "content": "只回复 OK"}], max_tokens=8, force_route="remote")
 except Exception as exc:
     print(f"[copilot-sync-ai] Anthropic 探活失败: {exc}", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(11)
 if r.model == "mock" or (r.raw or {}).get("_dispatcher_mock"):
     print("[copilot-sync-ai] Anthropic 探活返回 mock，key 无效", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(11)
 print("[copilot-sync-ai] Anthropic key 探活 OK")
 PY
+  _probe_rc=$?
+  set -e
+  if [ "$_probe_rc" -ne 0 ]; then
+    if [ -n "${DEPLOY_WARNINGS_FILE:-}" ]; then
+      if [ "$_probe_rc" -eq 10 ]; then
+        deploy_warn "Anthropic 代理 TCP 探活失败，跳过 ANTHROPIC_HTTPS_PROXY 注入"
+        _INJECT_ANTH_PROXY=0
+      else
+        deploy_warn "Anthropic key 探活失败（余额不足或无效），不写入本地无效 key"
+      fi
+      _existing_key="$(env -u HTTPS_PROXY -u HTTP_PROXY kubectl get secret diting-copilot-conn -n "$STACK_NS" \
+        -o jsonpath='{.data.ANTHROPIC_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+      if [ -n "$_existing_key" ]; then
+        _HELM_ANTH_KEY="$_existing_key"
+        deploy_warn "已保留集群现有 ANTHROPIC_API_KEY（helm 继续提交其余 Copilot 配置）"
+      else
+        _HELM_ANTH_KEY=""
+        deploy_warn "集群尚无 ANTHROPIC_API_KEY，本次 helm 不注入 Anthropic key"
+      fi
+      echo "⚠️  [copilot-sync-ai] 探活未通过，helm 继续（无效 key/代理不覆盖 · 收尾见告警汇总）"
+    else
+      echo "错误: Anthropic 探活失败（key/代理不可达），已中止 helm 以免覆盖生产 Secret" >&2
+      exit 1
+    fi
+  fi
 fi
 
 _COPILOT_TAG="${COPILOT_IMAGE_TAG:-$(yq eval '.stack.copilot.image.tag // "latest"' "$CFG")}"
@@ -90,7 +121,6 @@ yq eval -i "
   .copilot.ai.lighthouseModel = \"${LIGHTHOUSE_REMOTE_MODEL:-claude-opus-4-6}\" |
   .copilot.ai.anthropicModel = \"${ANTHROPIC_MODEL:-claude-opus-4-6}\" |
   .copilot.ai.anthropicBaseUrl = \"${ANTHROPIC_BASE_URL:-https://api.anthropic.com}\" |
-  .copilot.ai.anthropicApiKey = \"${ANTHROPIC_API_KEY}\" |
   .copilot.ai.deepseekApiKey = \"${DEEPSEEK_API_KEY:-}\" |
   .copilot.ai.deepseekBaseUrl = \"${DEEPSEEK_BASE_URL:-https://api.deepseek.com}\" |
   .copilot.ai.deepseekModel = \"${DEEPSEEK_MODEL:-deepseek-chat}\" |
@@ -110,11 +140,17 @@ yq eval -i "
   .copilot.persistence.enabled = ${_PG_PERSIST}
 " "$_VALUES_FILE"
 
+if [ -n "$_HELM_ANTH_KEY" ]; then
+  yq eval -i ".copilot.ai.anthropicApiKey = \"${_HELM_ANTH_KEY}\"" "$_VALUES_FILE"
+fi
+
 # 仅 Opus/Anthropic 走新加坡代理（勿注入进程级 HTTPS_PROXY，避免 akshare/DeepSeek 误走代理）
-_ANTH_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
-if [ -n "$_ANTH_PROXY" ]; then
-  yq eval -i ".copilot.ai.anthropicHttpsProxy = \"${_ANTH_PROXY}\"" "$_VALUES_FILE"
-  echo "ℹ️  已注入 Anthropic 专用代理 ANTHROPIC_HTTPS_PROXY（Pod 不设 HTTPS_PROXY）"
+if [ "$_INJECT_ANTH_PROXY" = "1" ]; then
+  _ANTH_PROXY="${ANTHROPIC_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
+  if [ -n "$_ANTH_PROXY" ]; then
+    yq eval -i ".copilot.ai.anthropicHttpsProxy = \"${_ANTH_PROXY}\"" "$_VALUES_FILE"
+    echo "ℹ️  已注入 Anthropic 专用代理 ANTHROPIC_HTTPS_PROXY（Pod 不设 HTTPS_PROXY）"
+  fi
 fi
 
 # 若 .env 提供 SMTP 则一并保留（与 copilot-sync-smtp 同源，避免覆盖丢失）
@@ -131,8 +167,7 @@ if [ -n "${COPILOT_SMTP_USERNAME:-}" ] && [ -n "${COPILOT_SMTP_PASSWORD:-}" ]; t
   " "$_VALUES_FILE"
 fi
 
-# prod 专用：默认 diting-prod kubeconfig，避免误用 ~/.kube/config 中过期 API（如旧 EIP 47.239.91.106）
-export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config-diting-prod}"
+# prod 专用：KUBECONFIG 已在探活前设置
 # 集群 API 不得走出口代理（仅 Pod 内 Anthropic 客户端读 ANTHROPIC_HTTPS_PROXY）
 env -u HTTPS_PROXY -u HTTP_PROXY helm upgrade diting-stack "$INFRA_ROOT/charts/diting-stack" -n "$STACK_NS" -f "$_VALUES_FILE" --timeout=10m --no-hooks
 trap - EXIT INT TERM
